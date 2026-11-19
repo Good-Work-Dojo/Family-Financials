@@ -1,0 +1,54 @@
+# A household's own config (accounts, rules, overrides) stays out of git; examples/ and
+# starter/ hold the shipped ones. No trailing slash, so a symbolic link named config is ignored too.
+/config
+
+# Derived data stores — never commit financial data.
+# Anchored to the repo root so it does NOT also ignore app/src/data/ (source).
+/data/
+*.db
+*.db.tmp
+
+# SimpleFIN durable store (raw snapshots + access credential) — never commit.
+# Lives at ../simplefin by default (sibling of the repo); this rule also covers
+# an in-repo store if store_dir is ever pointed inside.
+simplefin/
+
+# Refresh control state (queued request, rate-limit ledger, run status, lock) —
+# created by the stack, never source. A deployment keeps it beside the compose
+# file; locally `make scenario-store` writes here.
+/var/
+
+# The family store (scenarios, review answers, prefs and manual assets, written by
+# the dashboard via deploy/scenario_store.py) — never commit. A deployment keeps it
+# as a durable top-level dir; locally `make scenario-store` writes here too.
+scenarios/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+app/node_modules/
+app/dist/
+
+# OS
+.DS_Store
+
+# Environment files hold secrets; only the example is source.
+.env
+.env.*
+!.env.example
+
+# an agent's local settings
+.claude/
+
+# a checkout used as an install root: what the household's own files and secrets live in (store/ holds the bank
+# feed's snapshots and the AI step's answers and run log)
+/secrets/
+/state/
+/store/
+/imports/
+/backups/

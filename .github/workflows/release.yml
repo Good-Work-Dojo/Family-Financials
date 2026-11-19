@@ -1,0 +1,296 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# The release: when a release is published (or when run by hand for a tag, to publish it again), the two runtime
+# images are built natively on an amd64 and an arm64 runner, each pushed to GitHub's container registry by its digest
+# alone, and a last job joins each pair into one multi-architecture image under the release's tags. Names and tags come
+# from tools/verify/release_names.py: ghcr.io/<this repository, lower-cased>-etl and -web, tagged with the version
+# (the git tag without its v), plus <major>.<minor> and latest for a full release; a prerelease gets its own version
+# alone, and so does a full release below the highest full release already published (a patch to an older line), so
+# <major>.<minor> and latest never move back. Every build checks out the tag's commit as the first job read it, and
+# each image's labels and annotations (release_names.py labels) are the project's, in place of a base image's, their
+# revision that commit and their creation time its commit time.
+# The only actions are GitHub's own (actions/*), pinned by commit: the builder, the registry sign-in and the builds are
+# docker's own commands. The builder runs BuildKit from moby/buildkit, pinned by digest; a newer BuildKit is a change
+# made here by hand (`docker buildx imagetools inspect moby/buildkit:<version>` prints the digest).
+# The release's notes are CHANGELOG.md's section for the version, shown in the run's summary for the maintainer to
+# paste into the release, so no job here can write to the repository: every job's token reads it, and the build and
+# join jobs' also write packages.
+name: release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release's git tag to build and publish again, such as v1.0.0"
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.names.outputs.sha }}
+      created: ${{ steps.names.outputs.created }}
+      source: ${{ steps.names.outputs.source }}
+      etl: ${{ steps.names.outputs.etl }}
+      web: ${{ steps.names.outputs.web }}
+      version: ${{ steps.names.outputs.version }}
+      tags: ${{ steps.names.outputs.tags }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      # the names and tags the tag gives, the tag's commit and its commit time (which every later job builds and
+      # labels) and the notes: a tag of another form, no release for it (run by hand) or no CHANGELOG.md section for it
+      # stops the release here, before anything is built or pushed. Run by hand, whether the release is a prerelease is
+      # read from the release itself. <major>.<minor> and latest go only to a release at or above the highest full
+      # release published.
+      - id: names
+        env:
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then
+            PRERELEASE="$(gh release view "$TAG" --repo "$REPOSITORY" --json isPrerelease --jq .isPrerelease)"
+          fi
+          flag=()
+          if [ "$PRERELEASE" = true ]; then flag=(--prerelease); fi
+          gh release list --repo "$REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1000 \
+            --json tagName --jq '.[].tagName' >"$RUNNER_TEMP/released"
+          HIGHEST="$(python3 tools/verify/release_names.py highest <"$RUNNER_TEMP/released")"
+          if [ -n "$HIGHEST" ]; then flag+=(--highest-full "$HIGHEST"); fi
+          SHA="$(git rev-parse HEAD)"
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "the tag's commit could not be read" >&2; exit 1; }
+          CREATED="$(git show -s --format=%ct HEAD)"
+          [[ "$CREATED" =~ ^[0-9]+$ ]] || { echo "the tag's commit time could not be read" >&2; exit 1; }
+          python3 tools/verify/release_names.py names "$REPOSITORY" "$TAG" "${flag[@]}" >"$RUNNER_TEMP/names"
+          python3 tools/verify/release_names.py notes CHANGELOG.md "$TAG" >"$RUNNER_TEMP/notes"
+          python3 tools/verify/release_names.py labels etl "$SOURCE" "${TAG#v}" "$SHA" "$CREATED" >/dev/null
+          { echo "sha=$SHA"; echo "created=$CREATED"; echo "source=$SOURCE"; cat "$RUNNER_TEMP/names"; } \
+            >>"$GITHUB_OUTPUT"
+          { echo "## Release notes for $TAG (from CHANGELOG.md, to paste into the release)"; echo
+            cat "$RUNNER_TEMP/notes"; echo; echo "## Images"; echo
+            sed 's/^/    /' "$RUNNER_TEMP/names"; } >>"$GITHUB_STEP_SUMMARY"
+
+  # one job per architecture, each on its own native runner (no emulation): the two images pushed by digest alone.
+  # Each build step writes its image's labels and annotations from release_names.py, pushes the image by its digest
+  # and reads that digest back from the build's metadata file, refusing anything but sha256:<64 hex>.
+  build-amd64:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      etl: ${{ steps.etl.outputs.digest }}
+      web: ${{ steps.web.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - name: Start a BuildKit builder from its image pinned by digest
+        env:
+          BUILDKIT: moby/buildkit@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe # v0.34.2
+        run: |
+          set -euo pipefail
+          docker buildx create --name release --driver docker-container --driver-opt "image=$BUILDKIT" --use
+          docker buildx inspect --bootstrap
+      - name: Sign in to the registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - id: etl
+        env:
+          KIND: etl
+          PLATFORM: linux/amd64
+          IMAGE: ${{ needs.prepare.outputs.etl }}
+          FF_VERSION: ${{ needs.prepare.outputs.version }}
+          FF_SOURCE: ${{ needs.prepare.outputs.source }}
+          REVISION: ${{ needs.prepare.outputs.sha }}
+          CREATED: ${{ needs.prepare.outputs.created }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify/release_names.py labels "$KIND" "$FF_SOURCE" "$FF_VERSION" "$REVISION" "$CREATED" \
+            >"$RUNNER_TEMP/$KIND.args"
+          mapfile -t meta <"$RUNNER_TEMP/$KIND.args"
+          docker buildx build --file "deploy/Dockerfile.$KIND" --target "$KIND" --platform "$PLATFORM" \
+            --build-arg "FF_VERSION=$FF_VERSION" --build-arg "FF_SOURCE=$FF_SOURCE" "${meta[@]}" \
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file "$RUNNER_TEMP/$KIND.json" .
+          digest="$(python3 tools/verify/release_names.py digest "$RUNNER_TEMP/$KIND.json")"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - id: web
+        env:
+          KIND: web
+          PLATFORM: linux/amd64
+          IMAGE: ${{ needs.prepare.outputs.web }}
+          FF_VERSION: ${{ needs.prepare.outputs.version }}
+          FF_SOURCE: ${{ needs.prepare.outputs.source }}
+          REVISION: ${{ needs.prepare.outputs.sha }}
+          CREATED: ${{ needs.prepare.outputs.created }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify/release_names.py labels "$KIND" "$FF_SOURCE" "$FF_VERSION" "$REVISION" "$CREATED" \
+            >"$RUNNER_TEMP/$KIND.args"
+          mapfile -t meta <"$RUNNER_TEMP/$KIND.args"
+          docker buildx build --file "deploy/Dockerfile.$KIND" --target "$KIND" --platform "$PLATFORM" \
+            --build-arg "FF_VERSION=$FF_VERSION" --build-arg "FF_SOURCE=$FF_SOURCE" "${meta[@]}" \
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file "$RUNNER_TEMP/$KIND.json" .
+          digest="$(python3 tools/verify/release_names.py digest "$RUNNER_TEMP/$KIND.json")"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - name: Sign out of the registry
+        if: always()
+        run: docker logout ghcr.io
+
+  build-arm64:
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      etl: ${{ steps.etl.outputs.digest }}
+      web: ${{ steps.web.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - name: Start a BuildKit builder from its image pinned by digest
+        env:
+          BUILDKIT: moby/buildkit@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe # v0.34.2
+        run: |
+          set -euo pipefail
+          docker buildx create --name release --driver docker-container --driver-opt "image=$BUILDKIT" --use
+          docker buildx inspect --bootstrap
+      - name: Sign in to the registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - id: etl
+        env:
+          KIND: etl
+          PLATFORM: linux/arm64
+          IMAGE: ${{ needs.prepare.outputs.etl }}
+          FF_VERSION: ${{ needs.prepare.outputs.version }}
+          FF_SOURCE: ${{ needs.prepare.outputs.source }}
+          REVISION: ${{ needs.prepare.outputs.sha }}
+          CREATED: ${{ needs.prepare.outputs.created }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify/release_names.py labels "$KIND" "$FF_SOURCE" "$FF_VERSION" "$REVISION" "$CREATED" \
+            >"$RUNNER_TEMP/$KIND.args"
+          mapfile -t meta <"$RUNNER_TEMP/$KIND.args"
+          docker buildx build --file "deploy/Dockerfile.$KIND" --target "$KIND" --platform "$PLATFORM" \
+            --build-arg "FF_VERSION=$FF_VERSION" --build-arg "FF_SOURCE=$FF_SOURCE" "${meta[@]}" \
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file "$RUNNER_TEMP/$KIND.json" .
+          digest="$(python3 tools/verify/release_names.py digest "$RUNNER_TEMP/$KIND.json")"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - id: web
+        env:
+          KIND: web
+          PLATFORM: linux/arm64
+          IMAGE: ${{ needs.prepare.outputs.web }}
+          FF_VERSION: ${{ needs.prepare.outputs.version }}
+          FF_SOURCE: ${{ needs.prepare.outputs.source }}
+          REVISION: ${{ needs.prepare.outputs.sha }}
+          CREATED: ${{ needs.prepare.outputs.created }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify/release_names.py labels "$KIND" "$FF_SOURCE" "$FF_VERSION" "$REVISION" "$CREATED" \
+            >"$RUNNER_TEMP/$KIND.args"
+          mapfile -t meta <"$RUNNER_TEMP/$KIND.args"
+          docker buildx build --file "deploy/Dockerfile.$KIND" --target "$KIND" --platform "$PLATFORM" \
+            --build-arg "FF_VERSION=$FF_VERSION" --build-arg "FF_SOURCE=$FF_SOURCE" "${meta[@]}" \
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file "$RUNNER_TEMP/$KIND.json" .
+          digest="$(python3 tools/verify/release_names.py digest "$RUNNER_TEMP/$KIND.json")"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+      - name: Sign out of the registry
+        if: always()
+        run: docker logout ghcr.io
+
+  merge:
+    needs: [prepare, build-amd64, build-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Sign in to the registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      # each multi-architecture image (an index of the two digests) under every tag, with the index's own annotations
+      - name: Join each image's two architectures under the release's tags
+        env:
+          ETL: ${{ needs.prepare.outputs.etl }}
+          WEB: ${{ needs.prepare.outputs.web }}
+          SOURCE: ${{ needs.prepare.outputs.source }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          REVISION: ${{ needs.prepare.outputs.sha }}
+          TAGS: ${{ needs.prepare.outputs.tags }}
+          ETL_AMD64: ${{ needs.build-amd64.outputs.etl }}
+          ETL_ARM64: ${{ needs.build-arm64.outputs.etl }}
+          WEB_AMD64: ${{ needs.build-amd64.outputs.web }}
+          WEB_ARM64: ${{ needs.build-arm64.outputs.web }}
+        run: |
+          set -euo pipefail
+          join() {   # IMAGE TITLE DESCRIPTION DIGEST...
+            local image="$1" title="$2" description="$3" t d
+            shift 3
+            local args=()
+            for t in $TAGS; do args+=(--tag "$image:$t"); done
+            args+=(--annotation "index:org.opencontainers.image.title=$title"
+                   --annotation "index:org.opencontainers.image.description=$description"
+                   --annotation "index:org.opencontainers.image.vendor=Family Financials"
+                   --annotation "index:org.opencontainers.image.licenses=AGPL-3.0-only"
+                   --annotation "index:org.opencontainers.image.source=$SOURCE"
+                   --annotation "index:org.opencontainers.image.url=$SOURCE"
+                   --annotation "index:org.opencontainers.image.documentation=$SOURCE"
+                   --annotation "index:org.opencontainers.image.version=$VERSION"
+                   --annotation "index:org.opencontainers.image.revision=$REVISION")
+            for d in "$@"; do
+              [[ "$d" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "a build job gave no digest for $image" >&2; exit 1; }
+              args+=("$image@$d")
+            done
+            docker buildx imagetools create "${args[@]}"
+            docker buildx imagetools inspect "$image:$VERSION"
+          }
+          join "$ETL" "Family Financials ETL" \
+            "Family Financials: the offline ingest, the family store, the refresh worker and the scheduler" \
+            "$ETL_AMD64" "$ETL_ARM64"
+          join "$WEB" "Family Financials web" "Family Financials: the dashboard and its sign-in page, served by Caddy" \
+            "$WEB_AMD64" "$WEB_ARM64"
+      - name: Sign out of the registry
+        if: always()
+        run: docker logout ghcr.io

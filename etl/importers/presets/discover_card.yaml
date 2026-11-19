@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Discover card: the activity download in CSV.
+#
+# One header line, then one row per transaction: the day of the purchase (Trans. Date), the day it posted (Post Date),
+# the description, the amount and Discover's own category.
+#
+# A row is dated by its Post Date: the bank feed and an OFX download date a card's rows by the day they posted, so
+# fewer purchases are in flight where two sources of one account meet. beancount_reds_importers states the date
+# pattern %m/%d/%Y for the Trans. Date; the Post Date is read with the same one, and a row whose Post Date it does not
+# read is skipped as such, never guessed (a file of mostly such rows is refused). The Trans. Date is not read.
+#
+# The sign: this export writes a purchase positive and a payment or a credit negative, so the amount is turned round
+# (sign: invert) and money out is stored negative. beancount_reds_importers negates every amount of this export before
+# booking it on the card's account, where a charge is negative, and says the numbers Discover supplies need inverting.
+id: discover_card
+label: Discover card
+kind: card
+source: >-
+  beancount_reds_importers (GPL-3.0 licence), beancount_reds_importers/importers/discover/__init__.py: a CSV importer
+  whose header is Trans. Date, Post Date, Description, Amount, Category; the Trans. Date read as the date with
+  %m/%d/%Y; the Description and the Category read; every amount negated,
+  https://github.com/redstreet/beancount_reds_importers/blob/main/beancount_reds_importers/importers/discover/__init__.py.
+  Read 2026-11-16.
+evidence: oss-definition
+institution: Discover
+download: On the card's website, open its activity and download the transactions as a CSV file.
+detect:
+  header: [Trans. Date, Post Date, Description, Amount, Category]
+date: {column: Post Date, format: "%m/%d/%Y"}
+amount: {column: Amount, sign: invert}
+description: {columns: [Description]}
+bank_category: Category

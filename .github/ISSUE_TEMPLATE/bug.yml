@@ -1,0 +1,54 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+name: Bug report
+description: Something does not work as the documents say it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting it. **Never paste real financial data here**: no statements, transactions, balances,
+        account numbers or names of people in your household. If the problem needs data to show, reproduce it with the
+        demo household (`./ff demo`) or with a few invented rows. A security problem goes to the repository's private
+        vulnerability reporting instead (see SECURITY.md), never to an issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and any message the dashboard or `ff` printed (with real figures removed).
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: The steps from a fresh `./ff demo`, if you can; otherwise the steps on your own install.
+      placeholder: |
+        1. ./ff demo
+        2. ./ff up
+        3. Open Spending, then …
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The images' tag `./ff ps` lists (such as 1.0.0), or the commit you built from.
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Where it runs
+      description: The operating system, the Docker and Compose versions (`docker version`, `docker compose version`), and the browser if the problem is in the dashboard.
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Before you send it
+      options:
+        - label: Nothing in this report is real financial data, an account number or a name from my household.
+          required: true

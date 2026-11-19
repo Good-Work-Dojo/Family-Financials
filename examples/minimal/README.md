@@ -1,0 +1,3 @@
+The smallest household the engine runs on, all invented: `config/` holds only `household.yaml` (one adult) and `accounts.yaml` (one checking account), `imports/` one month of its statement rows (January 2025, in the Chase checking download's layout), and there is no rule file. The month is in the past, so the first ingest counts it: its cash flow and its balance show at once.
+Copy the folder first (the ingest writes `data/` beside `config/`): `cp -r examples/minimal /tmp/ff-minimal`.
+From the repository root, check it and ingest it: `FF_HOME=/tmp/ff-minimal uv run python -m etl validate`, then `FF_HOME=/tmp/ff-minimal uv run python -m etl ingest`.

@@ -1,0 +1,264 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# The `web` server: the built dashboard and the household's exports, behind the sign-in the store keeps
+# (deploy/scenario_store.py; its rules and the headers it trusts are in deploy/auth.py's docstring). Read when Caddy
+# starts, from its environment:
+#   SITE_ADDRESS       what the site listens as: `:8080` (the image's default) serves plain HTTP on every address of the
+#                      container; a domain name, such as dash.example.net, gets automatic HTTPS (on 8443, with 8080
+#                      redirecting to it; compose.yaml publishes both)
+#   FF_HOSTNAMES       the names, besides an IP address, localhost and a name ending .local, that the dashboard answers
+#                      to, separated by spaces (none by default); a domain in SITE_ADDRESS served over HTTPS needs no
+#                      listing, one served as plain HTTP (http://…, behind a proxy that holds the certificate) does
+#   TRUSTED_PROXIES    the address ranges of a proxy in front whose X-Forwarded-For (and X-Forwarded-Proto) is
+#                      believed, separated by spaces (none by default: the address that connected is the client)
+#   FF_STORE_UPSTREAM  the store's host:port (default store:8123)
+{
+	admin off
+	# Caddy runs as any uid, so it listens above port 1023: plain HTTP on 8080 and, for a domain, HTTPS on 8443. A
+	# redirect to HTTPS names no port (Caddy takes https_port for the one the browser uses: 443, published to 8443).
+	http_port 8080
+	https_port 8443
+	servers {
+		trusted_proxies static {$TRUSTED_PROXIES}
+		# X-Forwarded-For read right to left: the client is the first address that is not a trusted proxy, so one a
+		# client wrote into the header itself (which a proxy appends to) never counts
+		trusted_proxies_strict
+		# a client that trickles its request in cannot hold one of the store's threads for long
+		timeouts {
+			read_header 10s
+			read_body 15s
+			idle 2m
+		}
+	}
+}
+
+# The headers every answer carries, the server's own error answers included, set as the answer goes out (so a header
+# the store sent is replaced). The policy allows the page's own files and React's style attributes: no inline script or
+# style block, nothing from elsewhere. Nothing says which server answered.
+(security_headers) {
+	header {
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+		Referrer-Policy same-origin
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+		-Via
+		defer
+	}
+	@tls protocol https
+	header @tls {
+		Strict-Transport-Security "max-age=31536000"
+		defer
+	}
+}
+
+# The site, and the container's own address over plain HTTP: what its health check asks (http://127.0.0.1:8080/healthz)
+# reaches this site whether SITE_ADDRESS is :8080 (the same listener) or a domain (whose port 8080 otherwise only
+# redirects), and is never redirected to HTTPS; beside a domain that address answers nothing else over plain HTTP.
+{$SITE_ADDRESS::8080}, http://127.0.0.1:8080 {
+	# One route block, so every step below runs in the order written (Caddy sorts a site block's directives by kind, never
+	# a route's), and of its `handle` blocks only the first that matches runs.
+	route {
+		# 1. the response headers
+		import security_headers
+
+		# 2. A Host this server does not know is refused before anything else is done or proxied (DNS rebinding: a page
+		#    elsewhere that makes its own name resolve to this server). Known: an IP address, localhost, a name ending
+		#    .local, a name in FF_HOSTNAMES, and over TLS the domain of SITE_ADDRESS, which Caddy has already matched
+		#    the Host against. An IPv6 address is any host holding a colon (with or without its brackets), which no
+		#    DNS name can. no-name.invalid keeps the list from being empty (the .invalid domain never resolves).
+		@unknown_host {
+			not protocol https
+			not vars_regexp {http.request.host} "^(?i:localhost|([a-z0-9-]+[.])+local|[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+|[]0-9a-f.:[]*:[]0-9a-f.:[]*)$"
+			not host {$FF_HOSTNAMES} no-name.invalid
+		}
+		respond @unknown_host "This dashboard does not answer to that address." 421
+
+		# 3. A GET or HEAD that carries a body is refused before anything is passed on: a body the store does not
+		#    expect could be read as a request of its own (the store also refuses one, and keeps no connection open).
+		@read_with_length {
+			method GET HEAD
+			header Content-Length *
+			not header Content-Length 0
+		}
+		respond @read_with_length "A GET or HEAD request carries no body." 400 {
+			close
+		}
+		@read_chunked {
+			method GET HEAD
+			header Transfer-Encoding *
+		}
+		respond @read_chunked "A GET or HEAD request carries no body." 400 {
+			close
+		}
+
+		#    With a domain in SITE_ADDRESS (a name with no colon: no port, no scheme), plain HTTP serves nothing but the
+		#    health check, which compose.yaml asks at the container's own address: any other request goes to the site's
+		#    name over HTTPS. With an address (`:8080`, the default) plain HTTP is the site and this never matches.
+		@plain_beside_https {
+			protocol http
+			not path /healthz
+			vars_regexp {env.SITE_ADDRESS} "^[^:]+$"
+		}
+		redir @plain_beside_https https://{env.SITE_ADDRESS}{uri} 308
+
+		# 4. The scheme the browser used: this connection's, or, when the request comes from a trusted proxy in front
+		#    (TRUSTED_PROXIES) that says exactly https or http in X-Forwarded-Proto, the proxy's word, taken before the
+		#    client's X-Forwarded-* headers are dropped (a tunnel that holds the certificate speaks plain HTTP to here).
+		vars ff_scheme {scheme}
+		@proxied_https {
+			vars {http.vars.trusted_proxy} true
+			header X-Forwarded-Proto https
+		}
+		vars @proxied_https ff_scheme https
+		@proxied_http {
+			vars {http.vars.trusted_proxy} true
+			header X-Forwarded-Proto http
+		}
+		vars @proxied_http ff_scheme http
+
+		# 5. The headers the store trusts come from this server only: a client's copies are dropped here, and every
+		#    request passed to the store (forward_auth's question included) carries this server's own: the client's
+		#    address (TRUSTED_PROXIES decides whether X-Forwarded-For is believed), the scheme and the Host it used.
+		#    Each request to the store has a connection of its own (keepalive off), so nothing one request leaves
+		#    unread on a connection is ever read as the next one's.
+		request_header -X-FF-Client
+		request_header -X-FF-Scheme
+		request_header -X-FF-Host
+		request_header -X-Forwarded-For
+		request_header -X-Forwarded-Proto
+		request_header -X-Forwarded-Host
+		request_header -X-Forwarded-Method
+		request_header -X-Forwarded-Uri
+		# above the store's own limits (its largest document is 1 MiB), so the store answers an oversized save in words
+		request_body {
+			max_size 2MB
+		}
+		encode gzip
+
+		# 6. Without a session: the sign-in page and what it loads, from /srv/public, which holds nothing else (each path
+		#    exactly, the icons only where the file exists); the health check; the sign-in itself, which the store
+		#    guards (the Origin rule, the throttle). The store's other /auth/ paths are never reachable from outside.
+		@login path /login
+		handle @login {
+			root * /srv/public
+			rewrite * /login.html
+			header Cache-Control "no-cache"
+			file_server
+		}
+		@login_files path /login.css /login.js /site.webmanifest
+		handle @login_files {
+			root * /srv/public
+			header Cache-Control "no-cache"
+			file_server
+		}
+		@icons {
+			path /icons/*
+			file {
+				root /srv/public
+			}
+		}
+		handle @icons {
+			root * /srv/public
+			file_server
+		}
+		@health path /healthz
+		handle @health {
+			respond "ok" 200
+		}
+		# The sign-in's body (the store reads at most 1 KiB of one) is read whole here before the store sees the request,
+		# so a client that holds its body back holds this server, not one of the store's few threads.
+		@sign_in path /auth/login /auth/logout /auth/status
+		handle @sign_in {
+			reverse_proxy {$FF_STORE_UPSTREAM:store:8123} {
+				header_up X-FF-Client {client_ip}
+				header_up X-FF-Scheme {http.vars.ff_scheme}
+				header_up X-FF-Host {hostport}
+				request_buffers 2KiB
+				transport http {
+					keepalive off
+				}
+			}
+		}
+		@auth_other path /auth /auth/*
+		handle @auth_other {
+			respond 404
+		}
+
+		# 7. Everything else needs a session. forward_auth asks the store's /auth/check about this request (the client's
+		#    headers that survive the stripping above, never its body; the store reads only the method, the path, Accept,
+		#    Sec-Fetch-Mode and Cookie, and the three this server sets): 204 lets it through; any other answer (302 to
+		#    /login for a page load, else 401) goes back to the browser as the store gave it. No path is public by its
+		#    extension.
+		handle {
+			forward_auth {$FF_STORE_UPSTREAM:store:8123} {
+				uri /auth/check
+				header_up X-FF-Client {client_ip}
+				header_up X-FF-Scheme {http.vars.ff_scheme}
+				header_up X-FF-Host {hostport}
+				transport http {
+					keepalive off
+				}
+			}
+
+			# the family store's API; each body is read whole here first (up to the 2MB request_body limit above every
+			# document's own), so a slow upload holds this server, not one of the store's threads
+			@api path /api/*
+			handle @api {
+				reverse_proxy {$FF_STORE_UPSTREAM:store:8123} {
+					header_up X-FF-Client {client_ip}
+					header_up X-FF-Scheme {http.vars.ff_scheme}
+					header_up X-FF-Host {hostport}
+					request_buffers 2MB
+					transport http {
+						keepalive off
+					}
+				}
+			}
+
+			# The build id the open dashboard polls (app/src/data/useBuildCheck.ts), emitted by `vite build` beside
+			# index.html: from the bundle, never the exports, and never cached (a cached copy would hide the very update
+			# it announces).
+			@version path /version.json
+			handle @version {
+				root * /srv/site
+				header Cache-Control "no-store"
+				file_server
+			}
+
+			# The household's exports, from the live mount the ingest writes (atomically, so a half-written file is never
+			# served). Revalidated on every load, so a reload after an ingest shows the new numbers, and private: never
+			# kept by a cache shared with others in front of the browser.
+			@exports {
+				path *.json
+				not path /version.json /api/*
+			}
+			handle @exports {
+				root * /srv/exports
+				header Cache-Control "private, no-cache"
+				file_server
+			}
+
+			# The dashboard: its files from the bundle, any other path its page (the routes live after '#'). The page and
+			# the theme script are revalidated on every load (an old index.html would name asset files a deploy removed);
+			# the hashed assets are named by their content.
+			handle {
+				root * /srv/site
+				route {
+					try_files {path} /index.html
+					@shell path / /index.html /theme.js
+					header @shell Cache-Control "no-cache"
+					file_server
+				}
+			}
+		}
+	}
+
+	# The server's own error answers (a file that is not there, a method a file does not take, a body over the limit,
+	# the store not answering): the same headers, and the status in a few plain words.
+	handle_errors {
+		import security_headers
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}

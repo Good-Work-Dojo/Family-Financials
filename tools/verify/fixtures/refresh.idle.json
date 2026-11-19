@@ -1,0 +1,22 @@
+{
+ "state": "idle",
+ "trigger": null,
+ "request_nonce": null,
+ "queued_nonce": null,
+ "started_at": null,
+ "finished_at": null,
+ "rc": null,
+ "steps_failed": [],
+ "warnings": [],
+ "files_only": false,
+ "feed_errors": [],
+ "reauth_needed": [],
+ "can_refresh": true,
+ "reason": "ok",
+ "retry_after_s": 0,
+ "used_today": 0,
+ "limit_per_day": 6,
+ "last_refresh_at": null,
+ "schedule": {"times": ["01:00", "09:00", "17:00"], "timezone": "@household-timezone@"},
+ "ingest": {"wanted": false, "last_started_at": null, "last_finished_at": null, "last_rc": null}
+}

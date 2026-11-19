@@ -1,0 +1,51 @@
+[project]
+name = "finance-etl"
+version = "1.0.0"
+description = "Family Financials ETL: read-only source files -> SQLite + JSON exports"
+authors = [{ name = "Family Financials contributors" }]
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "certifi>=2024.0",   # CA bundle for the SimpleFIN HTTPS fetch (macOS lacks one)
+    # the optional AI step's two providers, imported only by etl/ai/providers.py and only when it calls one; each a
+    # release at least 14 days old when pinned, its dependencies locked no newer (uv.lock's exclude-newer)
+    "anthropic==2.4.0",
+    "openai==3.44.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Good-Work-Dojo/Family-Financials"
+Source = "https://github.com/Good-Work-Dojo/Family-Financials"
+Issues = "https://github.com/Good-Work-Dojo/Family-Financials/issues"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.15"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# Python lives in etl/, tests/, deploy/, tools/; everything else is JS, YAML, or data.
+extend-exclude = ["app", "data", "node_modules"]
+
+[tool.ruff.lint]
+# F  = pyflakes: unused imports/vars, undefined names, dead patterns
+# I  = import sorting
+# B  = bugbear: real-bug patterns (raise-from, zip strict, mutable defaults, …)
+# E9 = syntax/io errors (never stylistic)
+# Deliberately NOT enabled: E1/E2/E5/E7/W formatting opinions (the codebase
+# intentionally uses compact `x; y` one-liners and lines up to ~132 chars) and
+# UP modernization (churn, not correctness).
+select = ["F", "I", "B", "E9"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["etl"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["etl"]

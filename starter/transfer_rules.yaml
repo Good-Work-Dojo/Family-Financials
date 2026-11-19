@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Transfer rules: which rows are money moving between your own accounts, so that they count as neither spending nor
+# income. A rule types a row the bank export leaves as an ordinary purchase; the rules are tried in order and the
+# first match wins. Every pattern is a regular expression matched against the bank's descriptor with case ignored.
+#
+# A rule's keys:
+#   name                a short id; load errors and review questions name the rule by it
+#   pattern             the descriptor wording the rule recognises
+#   kinds | accounts    exactly one of the two: the account kinds whose rows the rule reads (checking, savings,
+#                       credit-card, brokerage, loan), or the accounts.yaml ids
+#   sign                optional: credit (money in) or debit (money out)
+#   bank_type           optional: the exact value of the export's own type column
+#   type                transfer, cc-payment or investment
+#   counter_hint        optional: where the other leg lives; pairing prefers a leg there. One of: an accounts.yaml
+#                       id; a name under groups:; kind:<kind> (any account of that kind); bank_any (any checking,
+#                       savings or card account); a name under outside:; or from_text:<template>, whose {1}, {2}…
+#                       are filled from the pattern's groups
+#   needs_review        optional: true sends every row the rule types to review
+#   open_question       optional: a question shown once for the rule
+#
+# A transfer or card payment is kept out of spending and income when both sides are in your data and pair. A payment
+# received on a card is always kept out. An `accounts:` rule's row stays a transfer too, listed as a gap in the data
+# while the hinted account's data covers its date. Any other side that finds no partner stays an ordinary row: flagged
+# for review when a `kinds:` rule (every rule below is one) recognised it or when it is uncategorised above the review
+# thresholds; counted without a flag when one of your category rules, the bank's own label or a learned rule filed it.
+# A `kinds:` rule whose counter_hint is a name under outside: has its other leg outside your data, so it cannot be
+# paired and its rows go back to review: scope such a rule with accounts: instead.
+#
+# Keep patterns narrow: a rule that matches a real purchase hides that spending. The whole file is checked when the
+# ingest starts, and a problem stops it with the rule's name.
+
+# Person-to-person payment apps. A row on a checking, savings or card account whose descriptor matches one of these
+# is paired with its other leg when both legs are your own accounts. An unpaired one is a payment to or from someone
+# else: a cash-out credit becomes income and goes to review, any other row goes to review above the review threshold
+# (assumptions.yaml venmo_review_threshold). Without this block no row is treated as a payment-app row.
+# PAYPAL INST XFER also starts the descriptor of ordinary PayPal purchases: an unpaired one is filed under
+# Venmo/Zelle Unknown (the catch-all in category_rules.yaml) and goes to review like any other payment-app row.
+# Two optional keys read a bank's own Zelle format; add them only once you know your bank's export:
+#   zelle_bank_types: [<code>, ...]    values of the export's type column that mark a Zelle row
+#   zelle_party: '<pattern>'           the wording that names the counterparty, its name in one group ( ), matched
+#                                      against the descriptor in capitals: a Zelle row naming someone outside the
+#                                      household is a payment to or from them, never a transfer
+# Without zelle_party every Zelle row may pair; one with no equal opposite row on another of your accounts stays
+# spending or income.
+# A pair is claimed only when no other row could be its counterpart; add `pairing: nearest` to take the closest one.
+venmo_patterns:
+  debit: '\bVENMO\b|\bCASH ?APP\b|\bPAYPAL\s+INST\s+XFER\b'
+  credit: '\bVENMO\s+CASH ?OUT\b|\bCASH ?APP\b.*\bCASH ?OUT\b|\bPAYPAL\s+TRANSFER\b'
+  zelle: '\bZELLE\b'
+
+# Named counter hints: `name: {accounts: [accounts.yaml ids], expect_counterpart: true|false}` (false when the
+# accounts import no transactions, so an unpaired leg is never a gap in the data).
+groups: {}
+
+# Counter hints whose far side is outside your data, such as an account you do not track: never a gap in the data.
+outside: []
+
+# Pair two rows nothing explains — no rule typed or filed them, no review answer names them — when they are exactly
+# opposite amounts on two of your accounts a few business days apart and nothing else could be either one's other leg.
+# Turn it off once your own rules name every transfer.
+generic_matching: true
+
+rules:
+  # A card payment as the card shows it: a credit that thanks you for the payment.
+  - name: card-payment-received
+    pattern: '\bPAYMENT[\s,.-]*THANK YOU\b|\bAUTOPAY PAYMENT\b'
+    kinds: [credit-card]
+    sign: credit
+    type: cc-payment
+    counter_hint: bank_any
+
+  # The same payment as the bank shows it: a debit paid to a credit card.
+  - name: card-payment-sent
+    pattern: '\bCREDIT ?CA?RD[\s-]*(?:E-?PAY(?:MENT)?|AUTO ?PAY|PAYMENT|PMT)\b|\bCRCARDPMT\b'
+    kinds: [checking, savings]
+    sign: debit
+    type: cc-payment
+    counter_hint: kind:credit-card
+
+  # A transfer between your own checking and savings accounts; the descriptor names the other side's kind.
+  - name: transfer-with-savings
+    pattern: '\bTRANSFER (?:TO|FROM) (?:SAV|SAVINGS)\b'
+    kinds: [checking, savings]
+    type: transfer
+    counter_hint: kind:savings
+
+  - name: transfer-with-checking
+    pattern: '\bTRANSFER (?:TO|FROM) (?:CHK|CHECKING)\b'
+    kinds: [checking, savings]
+    type: transfer
+    counter_hint: kind:checking

@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# The web image: the built dashboard and the sign-in page served by Caddy (deploy/Caddyfile). Its stages:
+#   web-build  the dashboard built from app/ (`npm ci`, then `npm run build`: `tsc --noEmit && vite build`) on the
+#              build machine's own platform, since its output is plain files; tools/verify runs eslint, vitest and tsc
+#              in it
+#   web        Caddy: /srv/site the built dashboard, /srv/public the sign-in page's files and nothing else (its source
+#              link pointed at FF_SOURCE), /usr/share/doc/family-financials the licence, its notice and the third
+#              parties' notices and licence texts (never served)
+# Each base is named by its tag and pinned by its digest (`image:tag@sha256:…`): the digest decides what is used, and
+# the tag is what a dependency bot follows; deploy/BASES.md says when each was read and how to move one. A build pulls
+# nothing by tag.
+
+FROM --platform=$BUILDPLATFORM node:24-slim@sha256:dc26ae92c9fb15cf6b1d63e20f0944b2efe0f115b20e00be48fb23fceb061c54 AS web-build
+WORKDIR /app/finance-app
+COPY app/package.json app/package-lock.json ./app/
+RUN cd app && npm ci
+COPY app ./app
+# the two files beside app/ the dashboard's tests read: the Makefile's targets, and pyproject.toml, which marks the
+# repository root the exports locator starts from
+COPY Makefile pyproject.toml ./
+# where the source is published (the final stage's label reads the same build argument): Settings' About card links to
+# it through VITE_SOURCE_URL (app/src/lib/product.ts)
+ARG FF_SOURCE=https://github.com/Good-Work-Dojo/Family-Financials
+# a build copies no public directory (app/vite.config.ts), so no export is ever built in: Caddy serves the household's
+# own, and the icons and manifest from /srv/public
+RUN cd app && VITE_SOURCE_URL="${FF_SOURCE}" npm run build
+
+FROM caddy:2@sha256:4851e54a46b206517c574821bb5cc67f170d2156041e9fbc4c9193b45e84a75b AS web
+# where the source is published, as in the stage above
+ARG FF_SOURCE=https://github.com/Good-Work-Dojo/Family-Financials
+COPY --from=web-build /app/finance-app/app/dist /srv/site
+COPY deploy/public /srv/public
+COPY deploy/Caddyfile /etc/caddy/Caddyfile
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES /usr/share/doc/family-financials/
+# the sign-in page links to the same source as the dashboard (deploy/source_link.sh changes that one attribute; the
+# script is mounted for this step only, so the image does not hold it)
+RUN --mount=type=bind,source=deploy/source_link.sh,target=/tmp/source_link.sh \
+    sh /tmp/source_link.sh /srv/public/login.html "${FF_SOURCE}" \
+    && chmod -R a+rX,go-w /srv/public /usr/share/doc/family-financials && chmod 0644 /etc/caddy/Caddyfile
+# It runs as whatever uid it is started with, so it listens on 8080, and on 8443 for a domain's HTTPS (ports above 1023
+# need no privilege; deploy/Caddyfile's http_port and https_port), and keeps
+# its own data and config (certificates, locks, the autosaved config) under /state/caddy, which compose mounts from
+# the household's state/caddy.
+ENV SITE_ADDRESS=:8080 \
+    XDG_DATA_HOME=/state/caddy/data \
+    XDG_CONFIG_HOME=/state/caddy/config
+EXPOSE 8080 8443
+# what the image is, for a registry and for `docker image inspect`: its name, where its source and documents live, its
+# licence, its release, each in place of the Caddy base image's own (.github/workflows/release.yml sets the same
+# through the registry's metadata)
+ARG FF_VERSION=1.0.0
+LABEL org.opencontainers.image.title="Family Financials web" \
+      org.opencontainers.image.vendor="Family Financials" \
+      org.opencontainers.image.source="${FF_SOURCE}" \
+      org.opencontainers.image.url="${FF_SOURCE}" \
+      org.opencontainers.image.documentation="${FF_SOURCE}" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.description="Family Financials: the dashboard and its sign-in page, served by Caddy" \
+      org.opencontainers.image.version="${FF_VERSION}"

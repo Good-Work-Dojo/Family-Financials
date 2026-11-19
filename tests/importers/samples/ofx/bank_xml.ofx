@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?OFX OFXHEADER="200" VERSION="220" SECURITY="NONE" OLDFILEUID="NONE" NEWFILEUID="NONE"?>
+<OFX>
+  <SIGNONMSGSRSV1>
+    <SONRS>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <DTSERVER>20301101080000.000[-5:EST]</DTSERVER>
+      <LANGUAGE>ENG</LANGUAGE>
+    </SONRS>
+  </SIGNONMSGSRSV1>
+  <BANKMSGSRSV1>
+    <STMTTRNRS>
+      <TRNUID>0</TRNUID>
+      <STATUS>
+        <CODE>0</CODE>
+        <SEVERITY>INFO</SEVERITY>
+      </STATUS>
+      <STMTRS>
+        <CURDEF>USD</CURDEF>
+        <BANKACCTFROM>
+          <BANKID>000099999</BANKID>
+          <ACCTID>000012345678</ACCTID>
+          <ACCTTYPE>SAVINGS</ACCTTYPE>
+        </BANKACCTFROM>
+        <BANKTRANLIST>
+          <DTSTART>20301001</DTSTART>
+          <DTEND>20301031</DTEND>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20301005</DTPOSTED>
+            <TRNAMT>-12,50</TRNAMT>
+            <FITID>X-0001</FITID>
+            <NAME>PANERA BREAD</NAME>
+            <MEMO>PANERA BREAD #000 SAMPLETOWN</MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>DEBIT</TRNTYPE>
+            <DTPOSTED>20301009</DTPOSTED>
+            <TRNAMT>-41.07</TRNAMT>
+            <FITID>X-0002</FITID>
+            <NAME>SHELL OIL &amp; GAS</NAME>
+            <MEMO></MEMO>
+          </STMTTRN>
+          <STMTTRN>
+            <TRNTYPE>INT</TRNTYPE>
+            <DTPOSTED>20301031</DTPOSTED>
+            <TRNAMT>+1.23</TRNAMT>
+            <FITID>X-0003</FITID>
+            <PAYEE>
+              <NAME>SAMPLE BANK INTEREST</NAME>
+              <ADDR1>1 SAMPLE ST</ADDR1>
+              <CITY>SAMPLETOWN</CITY>
+              <STATE>ST</STATE>
+              <POSTALCODE>00000</POSTALCODE>
+              <PHONE>000-000-0000</PHONE>
+            </PAYEE>
+          </STMTTRN>
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>1000.00</BALAMT>
+          <DTASOF>20301031</DTASOF>
+        </LEDGERBAL>
+      </STMTRS>
+    </STMTTRNRS>
+  </BANKMSGSRSV1>
+</OFX>

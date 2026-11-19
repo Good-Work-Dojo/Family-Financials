@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+name: Bank format request
+description: Ask for a bank's statement export the program cannot read yet.
+labels: [bank-format]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A format is added from the shape of a bank's file: its header row and how its rows are laid out. **Never
+        attach real statements, account numbers or names.** Copy the header row as it is, then type five to ten rows
+        of your own invention that keep the shape of the real ones: the same columns in the same order, the same date
+        and amount forms, the same quoting, a debit and a credit, and any odd row the file has (a pending row, a
+        running balance, a blank line). Invent the merchants, the amounts and the descriptions; put zeros in place of
+        any account or card number.
+
+        First, `./ff import detect FILE` says whether a format already reads the file, and `./ff import map FILE`
+        writes a preset for your own household from it: if that works, you may not need this form (but a preset
+        shared here helps every household with that bank).
+  - type: input
+    id: bank
+    attributes:
+      label: Bank and account type
+      placeholder: Example Bank, checking
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: File type
+      options:
+        - CSV
+        - OFX or QFX
+        - Another type
+    validations:
+      required: true
+  - type: textarea
+    id: header
+    attributes:
+      label: The header row, exactly as the file has it
+      description: The first line of the file (or the lines before the first transaction, if it has several), copied without changes.
+      render: text
+      placeholder: Date,Description,Amount,Running Bal.
+    validations:
+      required: true
+  - type: textarea
+    id: rows
+    attributes:
+      label: Five to ten invented rows in the file's shape
+      description: Made-up merchants, amounts and descriptions; zeros for any account or card number; the real file's date and amount forms and quoting.
+      render: text
+      placeholder: |
+        01/02/2026,"SAMPLE GROCERY #0000",-42.10,1957.90
+        01/03/2026,"PAYROLL EXAMPLE EMPLOYER",1500.00,3457.90
+        01/05/2026,"COFFEE SAMPLE",-4.75,3453.15
+        01/07/2026,"TRANSFER TO SAVINGS 000000000000",-200.00,3253.15
+        01/09/2026,"REFUND SAMPLE STORE",12.99,3266.14
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: How the file works
+      description: Which sign a purchase has (or whether debits and credits are separate columns), the date form (month first or day first), and anything unusual, such as pending rows or a summary block at the end.
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Before you send it
+      options:
+        - label: The rows above are invented. I attached no real statement, account number or name.
+          required: true

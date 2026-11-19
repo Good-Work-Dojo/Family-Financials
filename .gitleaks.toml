@@ -1,0 +1,10 @@
+# The secret scan's rules (tools/verify/ci.sh runs gitleaks over the tree): gitleaks's own, and the one allowance the
+# tree needs, with its reason.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "RFC 6455's example WebSocket key (base64 of 'the sample nonce'), which the security matrix sends to show that an upgrade is refused: a public value that opens nothing"
+condition = "AND"
+paths = ['''(^|/)tools/verify/stack_matrix\.py$''']
+regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']

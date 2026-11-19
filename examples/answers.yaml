@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+#
+# The answers ./ff init --answers FILE reads in place of asking, for an invented household. Copy this file OUTSIDE the
+# install directory, make it yours alone (chmod 600), change the names, the time zone and the passcode, then run
+#   ./ff init --answers ~/ff-answers.yaml
+# and delete the copy afterwards: it holds your passcode (and a bank feed's setup token, if you add one).
+#
+# As written it sets up the household with no account yet and no network at all: add statement files to imports/
+# and name them in config/accounts.yaml afterwards, or uncomment the files: block below for files already there.
+
+household:
+  name: The Samples                    # shown on the dashboard
+  adults: [Alex, Sam]                  # at least one
+  children: [Robin]                    # optional
+  joint_label: Joint                   # the name for what the adults hold together
+  timezone: America/New_York           # an IANA zone name: your days, and the hours the refresh runs on
+
+modules:
+  home_buying: false                   # true shows the second-house worksheet under Planning
+
+listen:
+  network: false                       # true serves the other devices of your home network, over plain HTTP
+  port: 8080
+
+passcode: "replace-this-sample-passcode"   # at least 8 characters, or 10 digits; the sign-in's, stored as a hash
+
+# Statement files already in imports/, each group by its file-name pattern or a file's name (./ff init names any
+# group it finds that this block leaves out):
+# files:
+#   "checking-*.csv": {kind: checking, owner: Joint, name: Sample Checking, institution: Sample Bank}
+#   "old-export.csv": skip
+
+# A SimpleFIN Bridge connection, with the single-use setup token it gives you. With this block, ./ff init uses the
+# network to claim the connection and list its accounts; every account it lists needs an entry, by its id or name:
+# feed:
+#   token: <the setup token>
+#   accounts:
+#     ACT-0001: {kind: checking, owner: Joint}
+#     Sample Card 0000: {kind: credit-card, owner: Alex}
+#     ACT-0003: {kind: loan, owner: Joint, mortgage: true}
+#     ACT-0004: skip

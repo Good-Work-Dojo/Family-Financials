@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Weekly dependency updates, one pull request per ecosystem for the minor and patch updates together and one for each
+# major update: the Python lockfile (uv.lock), the dashboard's (app/package-lock.json), the base images the two
+# Dockerfiles name by tag and digest (deploy/Dockerfile.etl and deploy/Dockerfile.web; deploy/BASES.md), and the
+# workflows' actions, pinned by commit. Each pull request runs the gate (tools/verify/ci.sh) like any other.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /app
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]

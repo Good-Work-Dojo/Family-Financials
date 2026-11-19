@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Category rules: the categories every row is filed under, the keyword rules that file a purchase by its descriptor,
+# the income rules that recognise deposits, and category renames.
+#
+# A purchase takes the first answer from: a vendor pattern's category (vendor_rules.yaml), a learned rule (from your
+# own review answers), a keyword rule below, the card issuer's own label (bank_category_map.yaml), else
+# Cash & Misc / Uncategorized — which sends it to the Review inbox from uncategorized_review_threshold
+# (assumptions.yaml) up.
+
+# The taxonomy: category -> its subcategories. Every rule, bank label, answer and override must name a category and
+# subcategory listed here. Add your own freely. The engine itself files rows under five of these names, so keep them:
+# Cash & Misc with Uncategorized and Venmo/Zelle Unknown, Internal (money moving between your own accounts; its
+# subcategories are filled in by the engine), Income with Other, and Fees & Interest.
+taxonomy:
+  Income: [Salary, Bonus, Consulting, Side Income, Reimbursement, Dividends, Interest, Tax Refund, Gifts Received,
+           Other]
+  Housing: [Mortgage, Property Tax, Home Insurance, Home Improvement, Home Services, HOA]
+  Utilities: [Electric/Gas, Water/Trash, Internet, Mobile]
+  Groceries: []
+  Dining: [Restaurants, Coffee, Delivery, Bars]
+  Kids: [Childcare, Activities, School, Supplies, Healthcare - Kids]
+  Health: [Medical, Dental, Pharmacy, Therapy, Fitness]
+  Transport: [Fuel, Rideshare, Parking/Tolls, Car Insurance, Car Maintenance, Car Payment]
+  Travel: [Flights, Lodging, Other]
+  Shopping: [Clothing, Electronics, Home Goods, Amazon, Gifts]
+  Subscriptions: [Streaming, Software, News/Media, Memberships]
+  Entertainment: [Events, Hobbies, Books/Games]
+  Personal Care: [Hair/Beauty, Other]
+  Pets: []
+  Giving: [Charity, Gifts to People]
+  "Fees & Interest": [Bank Fees, Late Fees, Margin Interest, Service Fees, Card Interest]
+  Debt: [Student Loan]
+  Insurance: [Life]
+  Taxes: [Income Tax, Property Tax]
+  "Cash & Misc": [ATM, Venmo/Zelle Unknown, Checks, Wire, Legal, Services, Uncategorized]
+  Internal: []
+
+# Keyword rules file a purchase by what its descriptor says. Rules run by stage (pre, then default, then post) and in
+# file order within a stage; the first match wins. A rule matches the cleaned descriptor or the raw one, case
+# ignored. To add one, put it above the catch-all, for example:
+#   - name: acme-coffee
+#     any: [{field: description, op: matches, value: '\bACME COFFEE\b'}]
+#     set: {category: Dining, subcategory: Coffee}
+# Fields: description, vendor, amount (dollars, negative = money out), account, owner, type, bank_category.
+keyword_rules:
+  # The catch-all for person-to-person payments: a Venmo, Zelle, PayPal or Cash App payment no rule above names is
+  # filed as Venmo/Zelle Unknown and goes to review. It matches every such descriptor, so it stays the last rule of
+  # the default stage. PayPal matches only in its transfer wording (an instant transfer, a transfer): a card payment
+  # through PayPal names a shop, so it is filed as a purchase like any other.
+  - name: p2p-unknown
+    stage: default
+    any:
+      - field: description
+        op: matches
+        value: '\b(?:VENMO|ZELLE|CASH ?APP|PAYPAL\s+(?:INST\s+XFER|TRANSFER))\b'
+    set:
+      category: "Cash & Misc"
+      subcategory: Venmo/Zelle Unknown
+      needs_review: true
+
+# Income rules recognise deposits into your bank accounts (a payroll, a pension), for example:
+#   - {pattern: 'ACME CORP PAYROLL', subcategory: Salary, earner: Alex, employer: Acme Corp}
+# `earner` is one of the members of household.yaml; a deposit no rule recognises is reviewed from
+# unknown_credit_review_threshold (assumptions.yaml) up. The optional `employer` draws the job on the cash-flow
+# chart: one band per earner and employer, from the first to the last deposit its rules recognise.
+income_rules: []
+
+# Category renames, for example `- {from: {category: Dining}, to: {category: Eating Out}}` (a subcategory: key
+# renames one subcategory): every stored reference follows the new name when the config loads; the files themselves
+# are never rewritten.
+renames: []

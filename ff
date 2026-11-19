@@ -1,0 +1,150 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# ff: the Family Financials command. It finds the install directory (FF_HOME, default this script's directory), checks
+# Docker, Compose (COMPOSE_MIN), the user (not root), the machine (64-bit) and the directory (not /, your home
+# directory or a Windows drive), notes rootless Docker, remapped user ids and SELinux (adapting nothing), then runs
+# init, demo, validate, doctor, passcode, import, rules, ai, backup and restore as the ETL image's `python -m etl ...`
+# as you, the install at /ff (read-only for doctor and validate), with no network but init's for a bank feed and ai
+# run's for the AI service (init's answers file mounted read-only, every other file inside the install), and up,
+# down, refresh, upgrade, build, logs and ps through Docker Compose (up and upgrade run `python -m etl preflight`).
+# Usage: ./ff init [--answers FILE] [--force]   ./ff demo [--force]   ./ff up   ./ff down   ./ff doctor
+#        ./ff passcode add NAME | remove NAME | list   ./ff import detect|preview|map|banks ...   ./ff validate
+#        ./ff rules preview|overlaps|starter-diff ...   ./ff backup [--include-secrets]   ./ff restore FILE [--force]
+#        ./ff refresh   ./ff upgrade [--to TAG]   ./ff build   ./ff logs [SERVICE]   ./ff ps   ./ff ai preview|run|reset
+# Settings are .env's alone: up, upgrade and build refuse a deployment setting (FF_BIND, FF_PORT, …) set in the
+# environment, where compose would read it over .env. Env: FF_HOME; FF_IMAGE_ETL, FF_IMAGE_WEB (default .env's, else
+# compose.yaml's; ff hands compose the ones it resolved); FF_COMPOSE, the whole compose prefix in place of `docker
+# compose --project-directory "$FF_HOME" -f "$FF_HOME/compose.yaml"`, split on spaces (a harness's own project).
+set -eu
+COMPOSE_MIN=2.20                                    # the oldest Docker Compose v2 this release runs with
+DEFAULT_ETL=ghcr.io/good-work-dojo/family-financials-etl:1.0.0 DEFAULT_WEB=ghcr.io/good-work-dojo/family-financials-web:1.0.0  # compose.yaml's defaults
+NL='
+'
+say() { printf 'ff: %s\n' "$*" >&2; }
+die() { say "$*"; exit 2; }
+usage() { sed -n '11,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+unset CDPATH
+HERE="$(cd -P -- "$(dirname -- "$0")" && pwd -P)"
+D="${FF_HOME:-$HERE}"
+case "$D" in -* | *"$NL"*) die "the install directory's name cannot start with - or hold a line break: choose another" ;; esac
+FF_HOME="$(cd -P -- "$D" 2>/dev/null && pwd -P)" || die "the install directory $D does not exist"
+[ "$(id -u)" != 0 ] || die "do not run ff as root: run it as the user who owns $FF_HOME, so what it makes is theirs"
+[ "$FF_HOME" != / ] || die "the install directory cannot be /: make one for it, such as ~/family-financials"
+[ "$FF_HOME" != "$(cd -P -- "${HOME:-/nonexistent}" 2>/dev/null && pwd -P || true)" ] \
+  || die "the install directory cannot be your home directory itself: make one, such as ~/family-financials, and put ff there"
+case "$FF_HOME" in
+  /mnt/[a-zA-Z] | /mnt/[a-zA-Z]/*)
+    die "$FF_HOME is on a Windows drive, where file owners and modes do not hold: put the install in your Linux home" ;;
+  *:* | *,* | *"$NL"*) die "the install directory's path holds a :, a , or a line break, which Docker cannot mount: choose another" ;;
+esac
+case "$(uname -m)" in armv6* | armv7* | armhf | arm) die "this is a 32-bit ARM computer ($(uname -m)), for which no image is built: use a 64-bit system" ;; esac
+command -v docker >/dev/null 2>&1 || die "Docker is not installed or not on PATH: install Docker Engine and its Compose plugin"
+V="$(docker compose version --short 2>/dev/null || true)"
+V="${V#v}"; MAJOR="${V%%.*}"; REST="${V#*.}"; MINOR="${REST%%.*}"
+case "$MAJOR.$MINOR" in *[!0-9.]* | .* | *.) MAJOR=0 MINOR=0 ;; esac
+if [ "$MAJOR" -lt "${COMPOSE_MIN%%.*}" ] || { [ "$MAJOR" -eq "${COMPOSE_MIN%%.*}" ] && [ "$MINOR" -lt "${COMPOSE_MIN#*.}" ]; }; then
+  die "Docker Compose v2 is needed at $COMPOSE_MIN or newer (found: ${V:-none}): install or update the docker compose plugin"
+fi
+SEC="$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null)" \
+  || die "Docker is not running, or you may not use it: start it, or add yourself to the docker group"
+case "$SEC" in *rootless*) say "note: Docker runs rootless, so the files the services write belong to an id mapped from yours, not to you; doctor names any it finds" ;; esac
+case "$SEC" in *userns*) say "note: Docker remaps user ids (userns-remap), so the files the services write belong to a remapped id, not to you; doctor names any it finds" ;; esac
+if [ "$(getenforce 2>/dev/null || true)" = Enforcing ]; then
+  say "note: SELinux is enforcing, so the services may be refused the install's folders until they are labelled for containers (chcon -R -t container_file_t $FF_HOME); ff does not relabel them"
+fi
+
+envval() { if [ -f "$FF_HOME/.env" ]; then sed -n "s/^$1=//p" "$FF_HOME/.env" | tail -n 1; fi; }
+image() {   # NAME DEFAULT: the image the environment names, else .env, else compose.yaml's default
+  case "$1" in FF_IMAGE_ETL) I="${FF_IMAGE_ETL:-}" ;; *) I="${FF_IMAGE_WEB:-}" ;; esac
+  [ -n "$I" ] || I="$(envval "$1")"
+  case "${I:=$2}" in -* | *[[:space:]]*) die "$1 is not an image name ($I): correct it" ;; esac
+  printf '%s' "$I"
+}
+ETL="$(image FF_IMAGE_ETL "$DEFAULT_ETL")"; WEB="$(image FF_IMAGE_WEB "$DEFAULT_WEB")"
+P="$(pwd -P)" WD=/ff ANSWERS=   # the container's working directory: where you are, when inside the install
+case "$P" in "$FF_HOME"/*) WD="/ff${P#"$FF_HOME"}" ;; esac
+unset FF_HOST_ADDRESSES FF_HOST_LISTENERS FF_STACK_PS
+
+# etl IMAGE NETWORK rw|ro ARGS...: python -m etl ARGS in IMAGE as you, the install at /ff (a terminal when stdin is one)
+etl() {
+  img="$1"; net="$2"; mnt="$3"; shift 3
+  if [ -t 0 ]; then tty=-t; else tty=; fi
+  # shellcheck disable=SC2086
+  docker run --rm -i $tty --user "$(id -u):$(id -g)" --network "$net" -v "$FF_HOME:/ff:$mnt" \
+    ${ANSWERS:+-v} ${ANSWERS:+"$ANSWERS:/run/ff-answers.yaml:ro"} -w "$WD" \
+    -e FF_HOME=/ff -e FF_HOST_HOME="$FF_HOME" -e FF_IMAGE_ETL -e FF_IMAGE_WEB \
+    -e FF_HOST_ADDRESSES -e FF_HOST_LISTENERS -e FF_STACK_PS "$img" python -m etl "$@"
+}
+compose() {
+  if [ -n "${FF_COMPOSE:-}" ]; then
+    # shellcheck disable=SC2086
+    FF_IMAGE_ETL="$ETL" FF_IMAGE_WEB="$WEB" $FF_COMPOSE "$@"
+  else
+    FF_IMAGE_ETL="$ETL" FF_IMAGE_WEB="$WEB" docker compose --project-directory "$FF_HOME" -f "$FF_HOME/compose.yaml" "$@"
+  fi
+}
+# what this computer's addresses are (for preflight) and which ports are in use and how the stack is (for doctor)
+addresses() { FF_HOST_ADDRESSES="$( (ip -o addr || hostname -I) 2>/dev/null || echo unknown)"; export FF_HOST_ADDRESSES; }
+outside() {
+  FF_HOST_LISTENERS="$( (ss -Hltn || netstat -ltn) 2>/dev/null || echo unknown)"
+  FF_STACK_PS="$(compose ps --format json 2>/dev/null || true)"
+  export FF_HOST_LISTENERS FF_STACK_PS
+}
+start() {   # preflight in IMAGE, then the stack up and healthy, then where to open it
+  addresses; outside
+  OUT="$(etl "$1" none rw preflight </dev/null)" || { [ -z "${OUT:-}" ] || printf '%s\n' "$OUT"; return 1; }
+  printf '%s\n' "$OUT" | sed '/^address: /d'
+  compose up -d --wait || return 3
+  say "the dashboard is up: open $(printf '%s\n' "$OUT" | sed -n 's/^address: //p')"
+}
+
+CMD="${1:-}"
+[ "$#" -eq 0 ] || shift
+case "$CMD" in up | upgrade | build) for K in FF_BIND FF_PORT FF_PORT_TLS FF_UID FF_GID SITE_ADDRESS FF_HOSTNAMES TRUSTED_PROXIES; do
+  if env | grep -q "^$K="; then die "$K is set in your environment, where compose would read it over .env: set it in .env instead"; fi
+done ;; esac
+case "$CMD" in
+  init)
+    NET=none OFF=--offline A= F= NEXT=
+    for arg in "$@"; do
+      if [ -n "$NEXT" ]; then A="$arg" NEXT=; continue; fi
+      case "$arg" in --answers) NEXT=1 ;; --answers=*) A="${arg#*=}" ;; --force) F=--force ;; *) die "init takes --answers FILE and --force" ;; esac
+    done
+    [ -z "$NEXT" ] || die "--answers needs the answers file"
+    if [ -n "$A" ]; then
+      [ -f "$A" ] || die "there is no answers file at $A"
+      ANSWERS="$(cd -P -- "$(dirname -- "$A")" && pwd -P)/$(basename -- "$A")"
+      case "$ANSWERS" in *:* | *,* | *"$NL"*) die "the answers file's path holds a :, a , or a line break, which Docker cannot mount: move it" ;; esac
+      if grep -q '^feed:' "$A"; then NET=bridge OFF=; fi
+    elif [ -t 0 ]; then
+      printf 'Connect a bank feed now (a setup token to paste, or a connection to finish)? [y/N] ' >&2
+      read -r YN || YN=
+      case "$YN" in [yY]*) NET=bridge OFF= ;; esac
+    fi
+    # shellcheck disable=SC2086
+    etl "$ETL" "$NET" rw init ${ANSWERS:+--answers} ${ANSWERS:+/run/ff-answers.yaml} $F $OFF ;;
+  demo | passcode | import | rules | backup | restore) etl "$ETL" none rw "$CMD" "$@" ;;
+  ai) case "${1:-}" in run) etl "$ETL" bridge rw ai "$@" ;; preview | reset) etl "$ETL" none rw ai "$@" ;; *) die "ai takes preview, run or reset" ;; esac ;;
+  validate) etl "$ETL" none ro validate "$@" ;;
+  doctor) outside; etl "$ETL" none ro doctor ;;
+  up) start "$ETL" || exit 1 ;;
+  down) compose down ;;
+  refresh)
+    say "a refresh in the running refresher: the bank feed (when one is set up), then an ingest"
+    compose exec refresher /opt/ff/deploy/refresh.sh ;;
+  build) compose build "$@" ;;
+  logs | ps) compose "$CMD" "$@" ;;
+  upgrade)
+    OLD="$ETL"
+    etl "$OLD" none rw upgrade-plan start "$@" </dev/null
+    ETL="$(image FF_IMAGE_ETL "$DEFAULT_ETL")"; WEB="$(image FF_IMAGE_WEB "$DEFAULT_WEB")"
+    failed() { etl "$OLD" none rw upgrade-plan failed "$1" </dev/null || true; exit 1; }
+    compose pull || failed pull
+    start "$ETL" || { [ "$?" -eq 3 ] && failed up; failed validate; }
+    compose exec refresher /opt/ff/deploy/refresh.sh ingest || failed ingest
+    outside; etl "$ETL" none ro doctor </dev/null || failed doctor
+    etl "$ETL" none rw upgrade-plan done </dev/null ;;
+  *) usage ;;
+esac

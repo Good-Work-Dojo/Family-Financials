@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Family Financials">
+  <title>Family Financials</title>
+  <defs>
+    <linearGradient id="ff-sky" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/>
+      <stop offset="0.5" stop-color="#0e7490"/>
+      <stop offset="1" stop-color="#0f766e"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#ff-sky)"/>
+
+  <g fill="none" stroke="#ffffff" stroke-width="30" opacity=".95">
+    <path d="M 74.3 182.6 A 196 196 0 0 1 418.5 146.4"/>
+    <path d="M 437.7 329.4 A 196 196 0 0 1 93.5 365.6"/>
+  </g>
+  <g fill="#ffffff" opacity=".95">
+    <path d="M 451.7 244.4 L 446.7 127.4 L 390.3 165.4 Z"/>
+    <path d="M 60.3 267.6 L 65.3 384.6 L 121.7 346.6 Z"/>
+  </g>
+
+  <g transform="translate(256,256) scale(0.86) translate(-256,-256)"
+     fill="none" stroke="#6ee7b7" stroke-linecap="round">
+    <path d="M 322 184 C 302 150 232 142 208 172 C 184 202 202 234 248 248 L 268 254 C 314 268 332 302 308 332 C 284 362 214 354 194 320" stroke-width="42"/>
+    <path d="M 256 116 L 256 396" stroke-width="32"/>
+  </g>
+</svg>

@@ -1,0 +1,344 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Vendor rules: how a raw bank descriptor becomes a vendor name. The engine tries each prefix below once, in order, on
+# what is left (so several can strip in turn, a later one after an earlier one), removes the cleanup patterns, then
+# tries the vendor patterns in order; when none matches, the vendor is the first four words of what is left,
+# title-cased with the acronyms kept upper case. Every entry below is a regular expression, matched with case ignored
+# (single quotes keep its backslashes as written).
+
+# Payment processors and marketplaces that print their own tag before the shop's name: removed from the start.
+strip_prefixes:
+  - '^SQ ?\*\s*'              # Square
+  - '^TST ?\*\s*'             # Toast
+  - '^SP\s+(?:\*\s*)?'        # Shopify
+  - '^PAYPAL ?\*\s*'          # PayPal
+  - '^PP ?\*\s*'              # PayPal
+  - '^IN \*\s*'               # Intuit QuickBooks payments
+  - '^EB \*\s*'               # Eventbrite
+  - '^FS \*\s*'               # FastSpring
+
+# Removed wherever it appears (each match becomes a space), in this order and after the engine's own format-neutral
+# cleanup. Bank and card metadata comes first, so the number and date patterns below never part a metadata label
+# from its value. Add a pattern for any noise your bank's export format adds.
+cleanup:
+  # ACH metadata in large US banks' export formats: an entry class code with the originator's id, a company id,
+  # the entry description, the individual's name; and a debit-card code with its number
+  - '\b(?:PPD|WEB|CCD|ARC|TEL) ID:?\s*\S+'
+  - '\bCO ID:?\s*\S+'
+  - '\bDES:[A-Z ]+\b'
+  - '\bINDN:[\w .]+?(?=\bCO\b|$)'
+  - '\bCKCD \d+'
+  - '\bRECURRING\b'                                                    # the card network's recurring-payment flag
+  - '\bX{4,}\d{2,4}\b'                                                  # a masked card or account number
+  - '\bCARD\s+\d{4}\b'                                                  # a card's last four digits
+  - '(?:\+?1[-. ]?)?(?:\(\d{3}\)\s?|\b\d{3}[-. ])\d{3}[-. ]\d{4}\b'    # a US phone number
+  - '#\s*\d+'                                                           # a store number
+  - '\+?\b\d{5,}\b'                                                     # a long digit run: reference, ZIP or phone
+  - '\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\s*$'                               # a trailing date
+
+# Words kept upper case when a vendor name is made from the descriptor, in addition to the engine's own list (ATM,
+# LLC, USA and other national ones). Add a local chain or a state abbreviation that should not read as a word.
+acronyms: [ACH, CPA, DDS, LLP]
+
+# Vendor patterns, tried in order; the first whose pattern matches the cleaned descriptor names the vendor, and a
+# `category:` (with an optional `subcategory:`) files every row of that vendor, ahead of the keyword rules:
+#   - {pattern: '\bACME COFFEE\b', vendor: Acme Coffee, category: Dining, subcategory: Coffee}
+# Anchor short or common-word patterns: a pattern that also matches a neighbour files that neighbour wrongly.
+#
+# The list below names national US merchants the way card networks print them. A pattern sees the descriptor after
+# the prefixes and cleanup above, in upper case: store numbers, phone numbers and long digit runs are already gone.
+# Each pattern holds a run of at least five letters or starts at the beginning of the descriptor (`^`), and ends at a
+# word boundary, so a neighbour's name, or the merchant's word inside another word, reaches no pattern. A name that is
+# also an ordinary word (Shell, Delta, Target) matches only with a second token that makes it the merchant, and a
+# longer name comes before a name it contains; a name that is also a person's name (Marriott, Nordstrom, Orkin)
+# starts the descriptor, so a payment to a person never matches. A store whose baskets span several categories
+# (a warehouse club, a big-box or convenience store, a marketplace) names its vendor and files nothing: its rows take
+# the card issuer's label, else the fallback, and its name is in `learning.exclude` below; Amazon is filed under its
+# own subcategory of Shopping and is excluded from learning all the same. Delete the merchants you never use, and add
+# your local ones.
+patterns:
+  # groceries
+  - {pattern: '\b(?:WHOLEFDS|WHOLE FOODS)\b', vendor: Whole Foods Market, category: Groceries}
+  - {pattern: '\bTRADER JOE''?S?\b', vendor: "Trader Joe's", category: Groceries}
+  - {pattern: '^ALDI\b', vendor: ALDI, category: Groceries}
+  - {pattern: '\bINSTACART\b', vendor: Instacart, category: Groceries}
+  - {pattern: '\bTHRIVE MARKET\b', vendor: Thrive Market, category: Groceries}
+  - {pattern: '\bHELLO ?FRESH\b', vendor: HelloFresh, category: Groceries}
+
+  # dining and coffee
+  - {pattern: '\bSTARBUCKS\b', vendor: Starbucks, category: Dining, subcategory: Coffee}
+  - {pattern: '^DUNKIN\b|\bDUNKIN ?DONUTS\b', vendor: "Dunkin'", category: Dining, subcategory: Coffee}
+  - {pattern: '\bMCDONALD''? ?S\b', vendor: "McDonald's", category: Dining, subcategory: Restaurants}
+  - {pattern: '\bBURGER KING\b', vendor: Burger King, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bCHICK-?FIL-?A\b', vendor: Chick-fil-A, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bTACO BELL\b', vendor: Taco Bell, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bCHIPOTLE (?:\d{4}|ONLINE|MEXICAN GRILL)\b', vendor: Chipotle, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bPANERA\b', vendor: Panera Bread, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bDOMINO''?S (?:PIZZA|\d{3,4})\b', vendor: "Domino's", category: Dining, subcategory: Restaurants}
+  - {pattern: '\bPIZZA HUT\b', vendor: Pizza Hut, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bPAPA JOHN''?S\b', vendor: Papa Johns, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bLITTLE CAESARS?\b', vendor: Little Caesars, category: Dining, subcategory: Restaurants}
+  - {pattern: '^KFC\b', vendor: KFC, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bPOPEYES\b', vendor: Popeyes, category: Dining, subcategory: Restaurants}
+  - {pattern: '\b(?:ARBYS|ARBY''S)\b', vendor: "Arby's", category: Dining, subcategory: Restaurants}
+  - {pattern: '\bSONIC DRIVE[ -]?IN\b', vendor: Sonic Drive-In, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bDAIRY QUEEN\b', vendor: Dairy Queen, category: Dining, subcategory: Restaurants}
+  - {pattern: '^JIMMY JOHN''?S\b', vendor: "Jimmy John's", category: Dining, subcategory: Restaurants}
+  - {pattern: '\bPANDA EXPRESS\b', vendor: Panda Express, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bFIVE GUYS\b', vendor: Five Guys, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bWINGSTOP\b', vendor: Wingstop, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bBUFFALO WILD WINGS\b', vendor: Buffalo Wild Wings, category: Dining, subcategory: Restaurants}
+  - {pattern: '\bOLIVE GARDEN\b', vendor: Olive Garden, category: Dining, subcategory: Restaurants}
+  - {pattern: '\b(?:APPLEBEES|APPLEBEE''S)\b', vendor: "Applebee's", category: Dining, subcategory: Restaurants}
+  - {pattern: '\bTEXAS ROADHOUSE\b', vendor: Texas Roadhouse, category: Dining, subcategory: Restaurants}
+  - {pattern: '^IHOP\b', vendor: IHOP, category: Dining, subcategory: Restaurants}
+
+  # delivery
+  - {pattern: '\bDOORDASH\b', vendor: DoorDash, category: Dining, subcategory: Delivery}
+  - {pattern: '^UBER ?\*? ?EATS\b', vendor: Uber Eats, category: Dining, subcategory: Delivery}
+  - {pattern: '\bGRUBHUB\b', vendor: Grubhub, category: Dining, subcategory: Delivery}
+
+  # fuel and charging
+  - {pattern: '\bSHELL (?:OIL|SERVICE)\b', vendor: Shell, category: Transport, subcategory: Fuel}
+  - {pattern: '\bEXXON(?:MOBIL)?\b', vendor: ExxonMobil, category: Transport, subcategory: Fuel}
+  - {pattern: '\bMOBIL\b(?! 1\b)', vendor: Mobil, category: Transport, subcategory: Fuel}
+  - {pattern: '\bCOSTCO GAS\b', vendor: Costco Gas, category: Transport, subcategory: Fuel}
+  - {pattern: '\bCHARGEPOINT\b', vendor: ChargePoint, category: Transport, subcategory: Fuel}
+  - {pattern: '\bELECTRIFY AMERICA\b', vendor: Electrify America, category: Transport, subcategory: Fuel}
+
+  # car care
+  - {pattern: '\bJIFFY LUBE\b', vendor: Jiffy Lube, category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bVALVOLINE\b', vendor: Valvoline, category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bPEP BOYS\b', vendor: Pep Boys, category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bAUTOZONE\b', vendor: AutoZone, category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bO''?REILLY AUTO\b', vendor: "O'Reilly Auto Parts", category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bADVANCE AUTO\b', vendor: Advance Auto Parts, category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bDISCOUNT TIRE\b', vendor: Discount Tire, category: Transport, subcategory: Car Maintenance}
+  - {pattern: '\bSAFELITE\b', vendor: Safelite, category: Transport, subcategory: Car Maintenance}
+
+  # rideshare, rail and parking
+  - {pattern: '^UBER(?= ?\*| TRIP| BV| ONE)\b', vendor: Uber, category: Transport, subcategory: Rideshare}
+  - {pattern: '^LYFT\b', vendor: Lyft, category: Transport, subcategory: Rideshare}
+  - {pattern: '\bAMTRAK\b', vendor: Amtrak, category: Travel, subcategory: Other}
+  - {pattern: '\bSPOTHERO\b', vendor: SpotHero, category: Transport, subcategory: Parking/Tolls}
+  - {pattern: '\bPARKMOBILE\b', vendor: ParkMobile, category: Transport, subcategory: Parking/Tolls}
+
+  # travel: airlines, lodging, booking sites, car rental
+  - {pattern: '\bDELTA AIR(?! (?:CONDITIONING|HEATING|SYSTEMS))(?: LINES)?\b', vendor: Delta Air Lines, category: Travel, subcategory: Flights}
+  - {pattern: '\bUNITED(?: AIRLINES|\.COM)\b', vendor: United Airlines, category: Travel, subcategory: Flights}
+  - {pattern: '\bAMERICAN AIRLINES\b', vendor: American Airlines, category: Travel, subcategory: Flights}
+  - {pattern: '\bSOUTHWES(?:T AIRLINES|T AIR(?! (?:CONDITIONING|HEATING|SYSTEMS)))?\b', vendor: Southwest Airlines, category: Travel, subcategory: Flights}
+  - {pattern: '\bJETBLUE\b', vendor: JetBlue, category: Travel, subcategory: Flights}
+  - {pattern: '\bALASKA AIR(?:LINES)?(?! (?:CONDITIONING|HEATING|SYSTEMS))\b', vendor: Alaska Airlines, category: Travel, subcategory: Flights}
+  - {pattern: '\bFRONTIER AIRLINES\b', vendor: Frontier Airlines, category: Travel, subcategory: Flights}
+  - {pattern: '^MARRIOTT\b|\bBY MARRIOTT\b', vendor: Marriott, category: Travel, subcategory: Lodging}
+  - {pattern: '\bHILTON (?:HOTELS?|GARDEN INN)\b', vendor: Hilton, category: Travel, subcategory: Lodging}
+  - {pattern: '\bHAMPTON INN\b', vendor: Hampton Inn, category: Travel, subcategory: Lodging}
+  - {pattern: '\bHOLIDAY INN\b', vendor: Holiday Inn, category: Travel, subcategory: Lodging}
+  - {pattern: '\bBEST WESTERN\b', vendor: Best Western, category: Travel, subcategory: Lodging}
+  - {pattern: '\bMOTEL 6\b', vendor: Motel 6, category: Travel, subcategory: Lodging}
+  - {pattern: '\bAIRBNB\b', vendor: Airbnb, category: Travel, subcategory: Lodging}
+  - {pattern: '\bBOOKING\.COM\b', vendor: Booking.com, category: Travel, subcategory: Lodging}
+  - {pattern: '\bEXPEDIA\b', vendor: Expedia, category: Travel}
+  - {pattern: '\bHERTZ RENT\b', vendor: Hertz, category: Travel, subcategory: Other}
+  - {pattern: '\bENTERPRISE RENT\b', vendor: Enterprise Rent-A-Car, category: Travel, subcategory: Other}
+  - {pattern: '\bAVIS RENT\b', vendor: Avis, category: Travel, subcategory: Other}
+  - {pattern: '\bBUDGET RENT\b', vendor: Budget Car Rental, category: Travel, subcategory: Other}
+  - {pattern: '\bALAMO RENT\b', vendor: Alamo Rent a Car, category: Travel, subcategory: Other}
+  - {pattern: '\bNATIONAL CAR RENTAL\b', vendor: National Car Rental, category: Travel, subcategory: Other}
+
+  # pharmacies, labs, dental and eye care (CVS and Walgreens are filed under Pharmacy because card networks class them
+  # as drug stores; re-file a purchase of something else in the Review inbox)
+  - {pattern: '\bCVS[/ ]?PHARMACY\b', vendor: CVS Pharmacy, category: Health, subcategory: Pharmacy}
+  - {pattern: '\bWALGREENS\b', vendor: Walgreens, category: Health, subcategory: Pharmacy}
+  - {pattern: '\bQUEST DIAGNOSTICS\b', vendor: Quest Diagnostics, category: Health, subcategory: Medical}
+  - {pattern: '\bLABCORP\b', vendor: Labcorp, category: Health, subcategory: Medical}
+  - {pattern: '\bASPEN DENTAL\b', vendor: Aspen Dental, category: Health, subcategory: Dental}
+  - {pattern: '\bLENSCRAFTERS\b', vendor: LensCrafters, category: Health, subcategory: Medical}
+  - {pattern: '\bWARBY PARKER\b', vendor: Warby Parker, category: Health, subcategory: Medical}
+  - {pattern: '\b1-?800 ?CONTACTS\b', vendor: 1-800 Contacts, category: Health, subcategory: Medical}
+
+  # personal care
+  - {pattern: '^ULTA\b', vendor: Ulta Beauty, category: Personal Care, subcategory: Hair/Beauty}
+  - {pattern: '^SEPHORA\b', vendor: Sephora, category: Personal Care, subcategory: Hair/Beauty}
+  - {pattern: '\bSALLY BEAUTY\b', vendor: Sally Beauty, category: Personal Care, subcategory: Hair/Beauty}
+  - {pattern: '\bBATH ?(?:&|AND) ?BODY ?WORKS\b', vendor: Bath & Body Works, category: Personal Care, subcategory: Other}
+  - {pattern: '\bGREAT CLIPS\b', vendor: Great Clips, category: Personal Care, subcategory: Hair/Beauty}
+  - {pattern: '\bSUPERCUTS\b', vendor: Supercuts, category: Personal Care, subcategory: Hair/Beauty}
+  - {pattern: '\bEUROPEAN WAX\b', vendor: European Wax Center, category: Personal Care, subcategory: Hair/Beauty}
+
+  # home improvement and home services
+  - {pattern: '\bHOME ?DEPOT\b', vendor: The Home Depot, category: Housing, subcategory: Home Improvement}
+  - {pattern: '\b(?:LOWES|LOWE''S)(?! (?:FOODS|MARKET|PAY))\b', vendor: "Lowe's", category: Housing, subcategory: Home Improvement}
+  - {pattern: '\bACE HARDWARE\b', vendor: Ace Hardware, category: Housing, subcategory: Home Improvement}
+  - {pattern: '\bHARBOR FREIGHT\b', vendor: Harbor Freight, category: Housing, subcategory: Home Improvement}
+  - {pattern: '^SHERWIN[ -]?WILLIAMS\b', vendor: Sherwin-Williams, category: Housing, subcategory: Home Improvement}
+  - {pattern: '\bTERMINIX\b', vendor: Terminix, category: Housing, subcategory: Home Services}
+  - {pattern: '^ORKIN\b', vendor: Orkin, category: Housing, subcategory: Home Services}
+  - {pattern: '\bADT SECURITY\b', vendor: ADT, category: Housing, subcategory: Home Services}
+  - {pattern: '\bSIMPLISAFE\b', vendor: SimpliSafe, category: Housing, subcategory: Home Services}
+
+  # general retail: electronics, home goods, office and sporting goods
+  - {pattern: '\b(?:BEST BUY|BESTBUY)(?! (?:AUTO|CAR|FURNITURE|TIRES?|LIQUORS?|CARPET)\b)\b', vendor: Best Buy, category: Shopping, subcategory: Electronics}
+  - {pattern: '\bAPPLE (?:ONLINE )?STORE\b', vendor: Apple Store, category: Shopping, subcategory: Electronics}
+  - {pattern: '\bAPPLE\.COM/US\b', vendor: Apple Store, category: Shopping, subcategory: Electronics}
+  - {pattern: '\bB ?& ?H PHOTO\b', vendor: B&H Photo, category: Shopping, subcategory: Electronics}
+  - {pattern: '^IKEA\b', vendor: IKEA, category: Shopping, subcategory: Home Goods}
+  - {pattern: '\bWAYFAIR\b', vendor: Wayfair, category: Shopping, subcategory: Home Goods}
+  - {pattern: '\bPOTTERY BARN\b', vendor: Pottery Barn, category: Shopping, subcategory: Home Goods}
+  - {pattern: '\bWILLIAMS[ -]?SONOMA\b', vendor: Williams-Sonoma, category: Shopping, subcategory: Home Goods}
+  - {pattern: '\bCRATE ?(?:&|AND) ?BARREL\b', vendor: Crate & Barrel, category: Shopping, subcategory: Home Goods}
+  - {pattern: '\bHOMEGOODS\b', vendor: HomeGoods, category: Shopping, subcategory: Home Goods}
+  - {pattern: '\bFIVE BELOW\b', vendor: Five Below, category: Shopping}
+  - {pattern: '\bOFFICE ?DEPOT\b', vendor: Office Depot, category: Shopping}
+  - {pattern: '\bDICK''?S SPORTING\b', vendor: "Dick's Sporting Goods", category: Shopping}
+
+  # clothing, shoes and department stores
+  - {pattern: '\b(?:MACYS|MACY''S)\b', vendor: "Macy's", category: Shopping}
+  - {pattern: '\b(?:KOHLS|KOHL''S)\b', vendor: "Kohl's", category: Shopping}
+  - {pattern: '\bJC ?PENNEY\b', vendor: JCPenney, category: Shopping}
+  - {pattern: '^NORDSTROM RACK\b', vendor: Nordstrom Rack, category: Shopping, subcategory: Clothing}
+  - {pattern: '^NORDSTROM\b', vendor: Nordstrom, category: Shopping, subcategory: Clothing}
+  - {pattern: '\b(?:TJ MAXX|TJMAXX)\b', vendor: T.J. Maxx, category: Shopping}
+  - {pattern: '\bMARSHALLS\b', vendor: Marshalls, category: Shopping}
+  - {pattern: '\bROSS (?:STORES|DRESS FOR LESS)\b', vendor: Ross Dress for Less, category: Shopping}
+  - {pattern: '\bBURLINGTON (?:STORES?|COAT FACTORY)\b', vendor: Burlington, category: Shopping}
+  - {pattern: '\b(?:OLD NAVY|OLDNAVY)\b', vendor: Old Navy, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bBANANA REPUBLIC\b', vendor: Banana Republic, category: Shopping, subcategory: Clothing}
+  - {pattern: '^NIKE\b', vendor: Nike, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bADIDAS\b', vendor: adidas, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bUNDER ARMOU?R\b', vendor: Under Armour, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bFOOT ?LOCKER\b', vendor: Foot Locker, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bAMERICAN EAGLE OUTF\w*\b', vendor: American Eagle, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bLULULEMON\b', vendor: lululemon, category: Shopping, subcategory: Clothing}
+  - {pattern: '\bVICTORIA''?S SECRET\b', vendor: "Victoria's Secret", category: Shopping, subcategory: Clothing}
+
+  # books, games and hobbies
+  - {pattern: '\bMICHAELS STORES?\b', vendor: Michaels, category: Entertainment, subcategory: Hobbies}
+  - {pattern: '\bHOBBY[ -]?LOBBY\b', vendor: Hobby Lobby, category: Entertainment, subcategory: Hobbies}
+  - {pattern: '\bBARNES ?(?:&|AND) ?NOBLE\b', vendor: Barnes & Noble, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bGAMESTOP\b', vendor: GameStop, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bAUDIBLE ?\*', vendor: Audible, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bKINDLE SVCS\b', vendor: Kindle, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bNINTENDO\b', vendor: Nintendo, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bPLAYSTATION\b', vendor: PlayStation, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bMICROSOFT ?\*? ?XBOX\b', vendor: Xbox, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bSTEAM ?GAMES\b', vendor: Steam, category: Entertainment, subcategory: Books/Games}
+  - {pattern: '\bROBLOX\b', vendor: Roblox, category: Entertainment, subcategory: Books/Games}
+
+  # tickets and cinemas
+  - {pattern: '\bTICKETMASTER\b', vendor: Ticketmaster, category: Entertainment, subcategory: Events}
+  - {pattern: '\bLIVE NATION\b', vendor: Live Nation, category: Entertainment, subcategory: Events}
+  - {pattern: '\bSTUBHUB\b', vendor: StubHub, category: Entertainment, subcategory: Events}
+  - {pattern: '\bAMC (?:THEATRES|THEATERS|ONLINE)\b', vendor: AMC Theatres, category: Entertainment, subcategory: Events}
+  - {pattern: '\bREGAL CINEMAS?\b', vendor: Regal, category: Entertainment, subcategory: Events}
+
+  # streaming
+  - {pattern: '\bNETFLIX\b', vendor: Netflix, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '^HULU\b', vendor: Hulu, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bDISNEY ?PLUS\b', vendor: Disney+, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\b(?:HBO MAX|HBOMAX)\b', vendor: HBO Max, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bMAX\.COM\b', vendor: HBO Max, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bPARAMOUNT ?PLUS\b', vendor: Paramount+, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bPARAMOUNT\+', vendor: Paramount+, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bPEACOCK ?TV\b', vendor: Peacock, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bYOUTUBE ?TV\b', vendor: YouTube TV, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bYOUTUBE ?PREMIUM\b', vendor: YouTube Premium, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bYOUTUBE\b', vendor: YouTube, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bPRIME VIDEO\b', vendor: Prime Video, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bSPOTIFY\b', vendor: Spotify, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bSIRIUS ?XM\b', vendor: SiriusXM, category: Subscriptions, subcategory: Streaming}
+  - {pattern: '\bSLING ?TV\b', vendor: Sling TV, category: Subscriptions, subcategory: Streaming}
+
+  # software and online services (Apple bills its apps, storage and services together)
+  - {pattern: '\bAPPLE\.COM/BILL\b', vendor: Apple, category: Subscriptions}
+  - {pattern: '\bGOOGLE (?:ONE|STORAGE)\b', vendor: Google One, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bMICROSOFT 365\b', vendor: Microsoft 365, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bDROPBOX\b', vendor: Dropbox, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bADOBE ?\*', vendor: Adobe, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bTURBOTAX\b', vendor: TurboTax, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bCANVA\b', vendor: Canva, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bZOOM\.US\b', vendor: Zoom, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bOPENAI\b', vendor: OpenAI, category: Subscriptions, subcategory: Software}
+  - {pattern: '\bDUOLINGO\b', vendor: Duolingo, category: Subscriptions, subcategory: Software}
+
+  # memberships
+  - {pattern: '\bAMAZON PRIME\b', vendor: Amazon Prime, category: Subscriptions, subcategory: Memberships}
+  - {pattern: '\bPATREON\b', vendor: Patreon, category: Subscriptions, subcategory: Memberships}
+
+  # news
+  - {pattern: '\bNYTIMES\b', vendor: The New York Times, category: Subscriptions, subcategory: News/Media}
+  - {pattern: '\bNEW YORK TIMES\b', vendor: The New York Times, category: Subscriptions, subcategory: News/Media}
+  - {pattern: '\bWALL STREET JOURNAL\b', vendor: The Wall Street Journal, category: Subscriptions, subcategory: News/Media}
+  - {pattern: '\bDOW JONES\b', vendor: Dow Jones, category: Subscriptions, subcategory: News/Media}
+  - {pattern: '\bWASHINGTON POST\b', vendor: The Washington Post, category: Subscriptions, subcategory: News/Media}
+  - {pattern: '\bSUBSTACK\b', vendor: Substack, category: Subscriptions, subcategory: News/Media}
+
+  # telecom (a carrier that sells home internet too is filed under Utilities alone)
+  - {pattern: '\bVERIZON WIRELESS\b', vendor: Verizon Wireless, category: Utilities, subcategory: Mobile}
+  - {pattern: '\bVZWRLSS\b', vendor: Verizon Wireless, category: Utilities, subcategory: Mobile}
+  - {pattern: '\bVERIZON\b', vendor: Verizon, category: Utilities}
+  - {pattern: '^AT ?&? ?T\b', vendor: AT&T, category: Utilities}
+  - {pattern: '\bMINT MOBILE\b', vendor: Mint Mobile, category: Utilities, subcategory: Mobile}
+  - {pattern: '\bBOOST MOBILE\b', vendor: Boost Mobile, category: Utilities, subcategory: Mobile}
+  - {pattern: '\bXFINITY MOBILE\b', vendor: Xfinity Mobile, category: Utilities, subcategory: Mobile}
+  - {pattern: '\bT[- ]?MOBILE\b', vendor: T-Mobile, category: Utilities}
+  - {pattern: '\bCRICKET WIRELESS\b', vendor: Cricket Wireless, category: Utilities, subcategory: Mobile}
+  - {pattern: '\bGOOGLE \*?FI\b', vendor: Google Fi, category: Utilities, subcategory: Mobile}
+  - {pattern: '\b(?:COMCAST|XFINITY)\b', vendor: Xfinity, category: Utilities, subcategory: Internet}
+  - {pattern: '\bSTARLINK\b', vendor: Starlink, category: Utilities, subcategory: Internet}
+
+  # insurance (an insurer that sells several kinds of policy is filed under Insurance alone)
+  - {pattern: '\bGEICO\b', vendor: GEICO, category: Transport, subcategory: Car Insurance}
+  - {pattern: '\bPROGRESSIVE INS(?:URANCE)?\b', vendor: Progressive, category: Transport, subcategory: Car Insurance}
+  - {pattern: '\bSTATE FARM\b', vendor: State Farm, category: Insurance}
+  - {pattern: '\bALLSTATE\b', vendor: Allstate, category: Insurance}
+  - {pattern: '\bLIBERTY MUTUAL\b', vendor: Liberty Mutual, category: Insurance}
+  - {pattern: '\bFARMERS INS(?:URANCE)?\b', vendor: Farmers Insurance, category: Insurance}
+
+  # shipping
+  - {pattern: '\bUPS STORE\b', vendor: The UPS Store, category: "Cash & Misc", subcategory: Services}
+  - {pattern: '\bFEDEX\b', vendor: FedEx, category: "Cash & Misc", subcategory: Services}
+
+  # fitness
+  - {pattern: '\bPLANET FIT(?:NESS)?\b', vendor: Planet Fitness, category: Health, subcategory: Fitness}
+  - {pattern: '\bANYTIME FITNESS\b', vendor: Anytime Fitness, category: Health, subcategory: Fitness}
+  - {pattern: '\bORANGETHEORY\b', vendor: Orangetheory Fitness, category: Health, subcategory: Fitness}
+  - {pattern: '\bCLASSPASS\b', vendor: ClassPass, category: Health, subcategory: Fitness}
+
+  # pets
+  - {pattern: '\bCHEWY\.COM\b', vendor: Chewy, category: Pets}
+  - {pattern: '\bPETCO\b', vendor: Petco, category: Pets}
+  - {pattern: '\bPETSMART\b', vendor: PetSmart, category: Pets}
+  - {pattern: '\bROVER\.COM\b', vendor: Rover, category: Pets}
+  - {pattern: '\bTRUPANION\b', vendor: Trupanion, category: Pets}
+
+  # childcare and lessons
+  - {pattern: '\bKINDERCARE\b', vendor: KinderCare, category: Kids, subcategory: Childcare}
+  - {pattern: '\bBRIGHT HORIZONS\b', vendor: Bright Horizons, category: Kids, subcategory: Childcare}
+  - {pattern: '\bKUMON\b', vendor: Kumon, category: Kids, subcategory: Activities}
+
+  # stores that sell everything: a vendor and no category (Amazon alone is filed, under its own subcategory)
+  - {pattern: '\bAMAZON(?:\.COM| MKTPL?| MKTPLACE| MARKETPLACE)\b', vendor: Amazon, category: Shopping, subcategory: Amazon}
+  - {pattern: '^AMZN\b', vendor: Amazon, category: Shopping, subcategory: Amazon}
+  - {pattern: '^EBAY\b', vendor: eBay}
+  - {pattern: '^ETSY\b', vendor: Etsy}
+  - {pattern: '\b(?:WALMART|WAL-MART)\b', vendor: Walmart}
+  - {pattern: '\bWM SUPERCENTER\b', vendor: Walmart}
+  - {pattern: '\bTARGET(?:\.COM| T- ?\d+)\b', vendor: Target}
+  - {pattern: '\bCOSTCO\b', vendor: Costco}
+  - {pattern: '\b(?:SAMS CLUB|SAMSCLUB|SAM''S CLUB)\b', vendor: "Sam's Club"}
+  - {pattern: '\bDOLLAR[ -]?GENERAL\b', vendor: Dollar General}
+  - {pattern: '\bDOLLAR ?TREE\b', vendor: Dollar Tree}
+  - {pattern: '\bFAMILY DOLLAR\b', vendor: Family Dollar}
+  - {pattern: '\b7-?ELEVEN\b', vendor: 7-Eleven}
+  - {pattern: '\bCIRCLE K\b', vendor: Circle K}
+
+# Vendors whose review answers are never turned into a learned rule (a payment app, a store that sells everything).
+learning:
+  exclude: [Amazon, eBay, Etsy, Walmart, Target, Costco, "Sam's Club", Dollar General, Dollar Tree, Family Dollar,
+            7-Eleven, Circle K]
+
+# Vendor renames: `- {from: Old Name, to: New Name}` re-spells a vendor everywhere it is stored when the config
+# loads; the files themselves are never rewritten.
+renames: []

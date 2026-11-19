@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Capital One credit card: the transaction download in CSV.
+#
+# One header line, then one row per transaction: the day of the purchase, the day it posted, the card's last digits,
+# the description, Capital One's own category, and the amount in one of two columns, Debit for a purchase and Credit
+# for a payment or a refund, each written without a sign. Dates are written year first (YYYY-MM-DD).
+#
+# The sign: a debit is money out of the card account and a credit money in, so the two columns are read as a debit and
+# a credit column (a debit stored negative). csv2ofx's mapping types a row whose Debit cell holds an amount as a debit
+# and any other as a credit, taking the amount unchanged from whichever cell holds it, and its test file shows a
+# payment in the Credit column and no signed cell. A row with a sign in either cell, or an amount in both, is skipped
+# with its reason, never guessed.
+#
+# A row is dated by its Posted Date, the day it posted, as csv2ofx dates it: the bank feed and an OFX download date a
+# card's rows by that day too, so fewer purchases are in flight where two sources of one account meet. The Transaction
+# Date and the Card No. columns are not read.
+id: capital_one_card
+label: Capital One credit card
+kind: card
+source: >-
+  csv2ofx (MIT licence): the mapping csv2ofx/mappings/capitalone.py (a header line; the Posted Date, the Card No. and
+  the Description columns; a row is a debit when its Debit column holds an amount, else a credit, its amount whichever
+  of Debit and Credit holds one), https://github.com/reubano/csv2ofx/blob/master/csv2ofx/mappings/capitalone.py, and
+  its test file data/test/capitalone.csv (the header Transaction Date, Posted Date, Card No., Description, Category,
+  Debit, Credit; dates YYYY-MM-DD; unsigned amounts; a payment in the Credit column),
+  https://github.com/reubano/csv2ofx/blob/master/data/test/capitalone.csv. Both read 2026-11-16.
+evidence: oss-definition
+institution: Capital One
+download: On the bank's website, open the card's transactions and download them as a CSV file.
+detect:
+  header: [Transaction Date, Posted Date, Card No., Description, Category, Debit, Credit]
+date: {column: Posted Date, format: "%Y-%m-%d"}
+amount: {debit: Debit, credit: Credit}
+description: {columns: [Description]}
+bank_category: Category

@@ -1,0 +1,15 @@
+# SYNTHETIC: a layout invented for the preset engine's tests. It describes no bank's export and is never shipped.
+#
+# No header line: each row is a date, a signed amount, a marker cell that always holds an asterisk, an optional
+# reference, and the description. The sign: a positive amount is money in, as the sample file beside the tests writes
+# it (sign: as_is).
+id: sample_headerless
+label: Synthetic headerless layout (tests only)
+kind: bank
+source: "synthetic: invented for tests/test_csv_presets.py; no bank's layout"
+evidence: synthetic
+detect:
+  headerless: {columns: 5, constant: {3: "*"}}
+date: {column: 1, format: "%m/%d/%Y"}
+amount: {column: 2, sign: as_is}
+description: {columns: [5]}

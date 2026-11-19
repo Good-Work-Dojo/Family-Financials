@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# The ETL image: the offline ingest, the store, the refresh worker and the scheduler (deploy/make_crontab.py writes
+# its crontab from household.yaml). Its stages:
+#   uv          the uv release the two Python stages copy their uv from (a stage of its own, so a dependency bot
+#               tracks it)
+#   python-base the Python base every other stage starts from (it carries tzdata, which household.yaml's timezone is
+#               resolved with by Python and by supercronic, and ca-certificates)
+#   py-build    /opt/venv (the locked runtime dependencies, byte-compiled) and /opt/ff (the code that runs, the demo
+#               household's generator, the two files `ff init` copies into an install, and the licence, its notice and
+#               the third parties' notices and licence texts)
+#   test        the whole tree at /app/finance-app with the dev group, git and make: what tools/verify runs ruff,
+#               pytest and the demo households in
+#   etl         the runtime, and the default target: /opt/venv, /opt/ff and supercronic; no uv, git, make or curl
+# Each base is named by its tag and pinned by its digest (`image:tag@sha256:…`): the digest decides what is used, and
+# the tag is what a dependency bot follows; deploy/BASES.md says when each was read and how to move one. A build pulls
+# nothing by tag.
+#
+# The runtime runs as whatever uid it is started with (`user:` in compose, `docker run --user`): everything in it is
+# world-readable, HOME is /tmp, and nothing it needs at run time is written inside the image. PYTHONSAFEPATH keeps the
+# working directory and a script's own directory off sys.path, so an etl/ in the working directory never shadows the
+# image's; a .pth file in the venv puts /opt/ff (the etl package) and /opt/ff/deploy (the store's and the refresh
+# worker's modules, which import each other by name) on it instead.
+
+# the uv release uv.lock is written with
+FROM ghcr.io/astral-sh/uv:0.10.11@sha256:3472e43b4e738cf911c99d41bb34331280efad54c73b1def654a6227bb59b2b4 AS uv
+
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS python-base
+ENV PYTHONDONTWRITEBYTECODE=1
+
+FROM python-base AS py-build
+COPY --from=uv /uv /usr/local/bin/uv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1
+# The dependencies only: the project's own code is not installed into the venv but copied to /opt/ff, where the etl
+# package finds starter/ and deploy/ beside itself.
+COPY pyproject.toml uv.lock /tmp/project/
+RUN cd /tmp/project && uv sync --frozen --no-dev --no-editable --compile-bytecode --no-install-project
+COPY etl /opt/ff/etl
+COPY starter /opt/ff/starter
+# `ff demo`'s generator (the product's invented household, not a test tool), and what `ff init` copies into an install
+# directory: compose.yaml, and the settings' template (as env.example: the image holds no .env* file)
+COPY tools/demo /opt/ff/tools/demo
+COPY compose.yaml /opt/ff/compose.yaml
+COPY .env.example /opt/ff/env.example
+# the program's licence and its additional terms, and the third parties' credits and licence texts, which travel with
+# every copy of the image
+COPY LICENSE NOTICE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES /opt/ff/
+COPY deploy/alert.py deploy/auth.py deploy/feed_check.py deploy/make_crontab.py deploy/refresh_runner.py \
+     deploy/refresh_state.py deploy/safe_files.py deploy/scenario_store.py deploy/refresh.sh /opt/ff/deploy/
+RUN python -m compileall -q /opt/ff/etl /opt/ff/deploy /opt/ff/tools \
+    && chmod -R a+rX,go-w /opt/ff \
+    && chmod 0755 /opt/ff/deploy/refresh.sh \
+    && printf '%s\n' /opt/ff /opt/ff/deploy \
+       > "$(/opt/venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/ff.pth"
+
+FROM python-base AS test
+RUN apt-get update && apt-get install -y --no-install-recommends make git \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=uv /uv /usr/local/bin/uv
+ENV HOME=/tmp \
+    UV_CACHE_DIR=/tmp/.uv-cache \
+    UV_PROJECT_ENVIRONMENT=/app/finance-app/.venv \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy
+WORKDIR /app/finance-app
+COPY pyproject.toml uv.lock ./
+RUN UV_NO_CACHE=1 uv sync --frozen --no-install-project
+COPY .dockerignore .env.example .gitattributes .gitignore AGENTS.md CHANGELOG.md CLAUDE.md LICENSE Makefile NOTICE \
+     README.md THIRD_PARTY_LICENSES THIRD_PARTY_NOTICES.md compose.yaml ff \
+     CLA.md CODE_OF_CONDUCT.md CONTRIBUTING.md SECURITY.md TRADEMARKS.md ./
+# the workflows, Dependabot's settings and the issue forms, which the tests read
+COPY .github .github
+# the documents and the README's pictures, which the tests read: their links, the key reference, the table of
+# supported banks, the importers' example preset, the pictures' size and chunks
+COPY docs docs
+COPY app app
+COPY deploy deploy
+COPY etl etl
+COPY examples examples
+COPY starter starter
+COPY tests tests
+COPY tools tools
+# the project itself, editable, so tests import the tree's etl; `uv run` then never syncs or relocks
+RUN UV_NO_CACHE=1 uv sync --frozen
+ENV UV_FROZEN=1 \
+    UV_NO_SYNC=1
+
+FROM python-base AS etl
+# supercronic, the scheduler's cron: a pinned release checked against its SHA-256 for the architecture built
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64|arm64) ;; \
+      *) echo "supercronic is pinned for amd64 and arm64 only, so the ETL image cannot be built for '${TARGETARCH}'" >&2; \
+         exit 1 ;; \
+    esac
+ADD --chmod=0755 https://github.com/aptible/supercronic/releases/download/v0.2.51/supercronic-linux-${TARGETARCH} \
+    /usr/local/bin/supercronic
+RUN case "${TARGETARCH}" in \
+      amd64) sum=cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc0aa123 ;; \
+      arm64) sum=4ae22576a78223d8ccdf5f3b3660a5cbb5288416bf0ca96afc4a36d195932b94 ;; \
+    esac \
+    && echo "${sum}  /usr/local/bin/supercronic" | sha256sum -c -
+COPY --from=py-build /opt/venv /opt/venv
+COPY --from=py-build /opt/ff /opt/ff
+ENV HOME=/tmp \
+    PYTHONSAFEPATH=1 \
+    PATH=/opt/venv/bin:$PATH
+WORKDIR /opt/ff
+# what the image is, for a registry and for `docker image inspect`: its name, where its source and documents live, its
+# licence, its release (.github/workflows/release.yml sets the same through the registry's metadata)
+ARG FF_SOURCE=https://github.com/Good-Work-Dojo/Family-Financials
+ARG FF_VERSION=1.0.0
+LABEL org.opencontainers.image.title="Family Financials ETL" \
+      org.opencontainers.image.vendor="Family Financials" \
+      org.opencontainers.image.source="${FF_SOURCE}" \
+      org.opencontainers.image.url="${FF_SOURCE}" \
+      org.opencontainers.image.documentation="${FF_SOURCE}" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.description="Family Financials: the offline ingest, the family store, the refresh worker and the scheduler" \
+      org.opencontainers.image.version="${FF_VERSION}"

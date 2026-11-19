@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+version: 1
+accounts:
+  demo_checking_0000:
+    name: Sample Checking
+    institution: Sample Bank
+    owner: Alex
+    kind: checking
+    parser: chase_checking
+    glob: "demo_checking_0000-*.csv"

@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Family Financials: the dashboard, its sign-in and the data refresh, as four services split by what each may touch.
+#
+#   web        Caddy (deploy/Caddyfile): the built dashboard, the sign-in page and the household's exports; it asks
+#              the store about every request that needs a session. The only service with published ports: plain
+#              HTTP, and HTTPS for a domain.
+#   store      the family store and the sign-in (deploy/scenario_store.py): the dashboard's documents, the passcodes
+#              it checks, the sessions, and the refresh mailbox. Reached only through web; it publishes nothing.
+#   scheduler  supercronic running deploy/refresh.sh at the household's hours (household.yaml `refresh`, on its
+#              `timezone`'s clock: deploy/make_crontab.py writes the crontab as it starts): the bank feed, then an
+#              ingest.
+#   refresher  the dashboard's "Refresh now" (deploy/refresh_runner.py): runs refresh.sh when the store queues a
+#              request, or the ingest alone when the store asks for one; it opens no port.
+#
+# Every host path is a directory beside this file, the install root, and the containers see the same names under
+# /ff (FF_HOME), from which each program finds every directory:
+#
+#   config/          the household's YAML                           scheduler, refresher (read-only)
+#   secrets/web/     the passcodes                                   store (read-only)
+#   secrets/feed/    the bank feed's access URL                      scheduler, refresher (read-only)
+#   secrets/ai/      the AI step's key                               scheduler, refresher (read-only)
+#   secrets/alerts/  the failure alerts' credentials                 scheduler, refresher (read-only)
+#   imports/         the bank files dropped in                       scheduler, refresher (read-only)
+#   store/           the feed's snapshots (back these up)            scheduler, refresher
+#   state/family/    the family documents: answers, prefs,           store; scheduler, refresher (read-only)
+#                    scenarios, manual assets
+#   state/auth/      the sign-in's sessions and devices               store
+#   state/refresh/   the mailbox: the request, the status, the       store, scheduler, refresher
+#                    ingest marker, the run's liveness, the
+#                    schedule
+#   state/engine/    the workers' own: the learned rules, the        scheduler, refresher
+#                    refresh lock, streaks, log and heartbeat
+#   state/caddy/     Caddy's own data and config                     web, at /state/caddy
+#   data/            the database and the exports (an ingest         scheduler, refresher; web only its exports/,
+#                    rebuilds them)                                   read-only, at /srv/exports
+#
+# The capability split: web and store are the two services a browser reaches, so neither holds a feed, AI or alert
+# credential or an ETL write mount, and web sees no secret at all. Only the two headless workers read the config, the
+# bank files and those credentials, and write the stores and the data. Secrets are mounted as directories, never as
+# single files: a file mount pins its inode, so a credential rewritten in place would stay unseen until a restart.
+# state/ is split by who may write, and no service mounts a folder that holds another's: the one folder two sides
+# write is the mailbox, and every read and write there (and every worker's read of the family documents) is made at
+# the name itself, never through a link (deploy/safe_files.py).
+#
+# Networks: web is on `front` (its published ports) and `back`; the store only on `back`, which has no way out; the
+# two workers on the default network, for the bank feed, sharing none with web or the store (they talk through the
+# files only).
+#
+# Every directory must exist, owned by the user the services run as, before the stack starts: the mounts never create
+# a missing one (Docker would make it empty and owned by root), so a missing directory stops its service instead.
+#
+# Settings come from .env beside this file (.env.example lists them): where web listens, the user the services run
+# as, the names and proxies the dashboard trusts, and the images. No secret is ever an environment variable here. The
+# images default to this release's published ones; in a checkout, `ff build` builds them under those same names.
+
+# What all four services share: the user they run as (the owner of the install's directories), no capabilities,
+# nothing an executable could raise them with, and a restart unless the stack was stopped.
+x-service: &service
+  user: "${FF_UID:-1000}:${FF_GID:-1000}"
+  restart: unless-stopped
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+# The two headless workers run the same refresh.sh, so they see the same directories; an init process reaps whatever
+# a run leaves behind.
+x-worker: &worker
+  <<: *service
+  image: "${FF_IMAGE_ETL:-ghcr.io/good-work-dojo/family-financials-etl:1.0.0}"
+  init: true
+  pids_limit: 512
+  environment:
+    FF_HOME: /ff
+  volumes:
+    - {type: bind, source: ./config, target: /ff/config, read_only: true}
+    - {type: bind, source: ./secrets/feed, target: /ff/secrets/feed, read_only: true}
+    - {type: bind, source: ./secrets/ai, target: /ff/secrets/ai, read_only: true}
+    - {type: bind, source: ./secrets/alerts, target: /ff/secrets/alerts, read_only: true}
+    - {type: bind, source: ./imports, target: /ff/imports, read_only: true}
+    - {type: bind, source: ./store, target: /ff/store}
+    - {type: bind, source: ./data, target: /ff/data}
+    - {type: bind, source: ./state/family, target: /ff/state/family, read_only: true}
+    - {type: bind, source: ./state/engine, target: /ff/state/engine}
+    - {type: bind, source: ./state/refresh, target: /ff/state/refresh}
+
+services:
+  web:
+    <<: *service
+    image: "${FF_IMAGE_WEB:-ghcr.io/good-work-dojo/family-financials-web:1.0.0}"
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+      target: web
+    environment:
+      # :8080, plain HTTP on every address of the container, or a domain for automatic HTTPS on 8443 (never empty)
+      SITE_ADDRESS: "${SITE_ADDRESS:-:8080}"
+      FF_HOSTNAMES: "${FF_HOSTNAMES:-}"
+      TRUSTED_PROXIES: "${TRUSTED_PROXIES:-}"
+      FF_STORE_UPSTREAM: store:8123
+      # Caddy's own data and config (a domain's certificates among them), in the household's state/caddy
+      XDG_DATA_HOME: /state/caddy/data
+      XDG_CONFIG_HOME: /state/caddy/config
+    volumes:
+      - {type: bind, source: ./data/exports, target: /srv/exports, read_only: true}
+      - {type: bind, source: ./state/caddy, target: /state/caddy}
+    read_only: true
+    tmpfs: [/tmp]
+    pids_limit: 256
+    networks: [front, back]
+    # this machine only by default; FF_BIND names another address of it to serve the home network. The second port is
+    # HTTPS, served only when SITE_ADDRESS is a domain (FF_BIND=0.0.0.0, FF_PORT=80 and FF_PORT_TLS=443 for one).
+    ports:
+      - "${FF_BIND:-127.0.0.1}:${FF_PORT:-8080}:8080"
+      - "${FF_BIND:-127.0.0.1}:${FF_PORT_TLS:-8443}:8443"
+    depends_on:
+      store:
+        condition: service_healthy
+    # /healthz at the container's own address over plain HTTP, which answers it whatever SITE_ADDRESS is and never
+    # redirects it (deploy/Caddyfile)
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  store:
+    <<: *service
+    image: "${FF_IMAGE_ETL:-ghcr.io/good-work-dojo/family-financials-etl:1.0.0}"
+    # the schedule its refresh view reports, and the household's zone its daily limits count days in, are the ones the
+    # scheduler writes in the mailbox as it starts (it reads household.yaml; the store cannot)
+    command: ["python", "/opt/ff/deploy/scenario_store.py", "--host", "0.0.0.0", "--port", "8123",
+              "--auth", "required"]
+    environment:
+      FF_HOME: /ff
+      # the names the proxy answers to, and the site's own when SITE_ADDRESS is a domain, so the store's own host
+      # rule agrees with it
+      FF_HOSTNAMES: "${FF_HOSTNAMES:-}"
+      SITE_ADDRESS: "${SITE_ADDRESS:-:8080}"
+    volumes:
+      - {type: bind, source: ./secrets/web, target: /ff/secrets/web, read_only: true}
+      - {type: bind, source: ./state/family, target: /ff/state/family}
+      - {type: bind, source: ./state/auth, target: /ff/state/auth}
+      - {type: bind, source: ./state/refresh, target: /ff/state/refresh}
+    read_only: true
+    tmpfs: [/tmp]
+    pids_limit: 256
+    # the proxy is its only caller, and it calls out to nothing
+    networks: [back]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8123/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  scheduler:
+    <<: *worker
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.etl
+      target: etl
+    # The crontab written from household.yaml to a file in /tmp, the schedule to the mailbox, then supercronic in the
+    # same process. A household.yaml that cannot give a schedule stops it with the validator's lines, so the service
+    # never runs, or reports healthy, on a schedule the household did not write.
+    command: ["python", "/opt/ff/deploy/make_crontab.py", "--run"]
+    # supercronic is running
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os, sys
+          def name(pid):
+              try:
+                  with open(f"/proc/{pid}/comm") as f:
+                      return f.read().strip()
+              except OSError:
+                  return ""
+          sys.exit(0 if any(name(p) == "supercronic" for p in os.listdir("/proc") if p.isdigit()) else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  refresher:
+    <<: *worker
+    command: ["python", "/opt/ff/deploy/refresh_runner.py"]
+    # The worker touches its heartbeat at least every 30 seconds between runs; one run holds its loop for at most 15
+    # minutes and the kill's grace (refresh_runner.py), so an older heartbeat means it stopped looping.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import os, sys, time
+          beat = os.path.join(os.environ["FF_HOME"], "state", "engine", "heartbeat")
+          sys.exit(0 if time.time() - os.stat(beat).st_mtime < 1000 else 1)
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  # web's published ports
+  front: {}
+  # web and the store: no route out
+  back:
+    internal: true

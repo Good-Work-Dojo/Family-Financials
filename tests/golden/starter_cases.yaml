@@ -1,0 +1,405 @@
+# Golden cases for the starter rule files (tests/test_golden_categorize.py). Every descriptor is invented and printed
+# the way card networks print national merchants: upper case, store numbers, a 555 phone number, a city and state, a
+# processor's prefix. `kind` is the account kind the row is on (default credit-card) and `amount` is in dollars
+# (default -10). A vendor that no pattern names is the first four words of the cleaned descriptor, title-cased.
+cases:
+  # groceries
+  - {desc: "WHOLEFDS SPV #10234 SAMPLEVILLE CA", vendor: Whole Foods Market, category: Groceries, source: vendor_rule}
+  - {desc: "WHOLE FOODS MARKET ANYTOWN NY", vendor: Whole Foods Market, category: Groceries, source: vendor_rule}
+  - {desc: "TRADER JOE S #552 ANYTOWN OH", vendor: "Trader Joe's", category: Groceries, source: vendor_rule}
+  - {desc: "ALDI 72034 ANYTOWN IL", kind: checking, vendor: ALDI, category: Groceries, source: vendor_rule}
+  - {desc: "INSTACART 888-555-0100 CA", vendor: Instacart, category: Groceries, source: vendor_rule}
+  - {desc: "THRIVE MARKET 800-555-0100 CA", vendor: Thrive Market, category: Groceries, source: vendor_rule}
+  - {desc: "HELLOFRESH 646-555-0100 NY", vendor: HelloFresh, category: Groceries, source: vendor_rule}
+
+  # dining and coffee; a pattern's category outranks the card issuer's label
+  - {desc: "STARBUCKS STORE 12345 ANYTOWN OH", vendor: Starbucks, category: Dining, subcategory: Coffee, source: vendor_rule}
+  - {desc: "STARBUCKS #12345 ANYTOWN WA", bank_category: Shopping, vendor: Starbucks, category: Dining, subcategory: Coffee, source: vendor_rule}
+  - {desc: "DUNKIN #345678 Q35 ANYTOWN MA", vendor: "Dunkin'", category: Dining, subcategory: Coffee, source: vendor_rule}
+  - {desc: "MCDONALD'S F12345 ANYTOWN OH", vendor: "McDonald's", category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "MCDONALD S F12345 ANYTOWN OH", vendor: "McDonald's", category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "BURGER KING #4521 ANYTOWN PA", vendor: Burger King, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "CHICK-FIL-A #01234 ANYTOWN GA", vendor: Chick-fil-A, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "TACO BELL #031234 ANYTOWN AZ", vendor: Taco Bell, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "CHIPOTLE 1234 ANYTOWN CO", vendor: Chipotle, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "CHIPOTLE ONLINE 800-555-0100 CA", vendor: Chipotle, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "PANERA BREAD #601234 ANYTOWN MO", vendor: Panera Bread, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "DOMINO'S 6421 ANYTOWN MI", vendor: "Domino's", category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "PIZZA HUT 031234 ANYTOWN KS", vendor: Pizza Hut, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "PAPA JOHNS #1234 ANYTOWN KY", vendor: Papa Johns, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "LITTLE CAESARS #1234 ANYTOWN MI", vendor: Little Caesars, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "KFC J123456 ANYTOWN KY", vendor: KFC, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "POPEYES 12345 ANYTOWN LA", vendor: Popeyes, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "ARBYS #1234 ANYTOWN OH", vendor: "Arby's", category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "SONIC DRIVE IN #1234 ANYTOWN OK", vendor: Sonic Drive-In, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "DAIRY QUEEN #12345 ANYTOWN MN", vendor: Dairy Queen, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "JIMMY JOHNS - 1234 ANYTOWN IL", vendor: "Jimmy John's", category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "PANDA EXPRESS #1234 ANYTOWN CA", vendor: Panda Express, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "FIVE GUYS 1234 ANYTOWN VA", vendor: Five Guys, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "WINGSTOP 1234 ANYTOWN NV", vendor: Wingstop, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "BUFFALO WILD WINGS 1234 ANYTOWN OH", vendor: Buffalo Wild Wings, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "OLIVE GARDEN 0012345 ANYTOWN FL", vendor: Olive Garden, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "APPLEBEES 1234 ANYTOWN IA", vendor: "Applebee's", category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "TEXAS ROADHOUSE #1234 ANYTOWN KY", vendor: Texas Roadhouse, category: Dining, subcategory: Restaurants, source: vendor_rule}
+  - {desc: "IHOP #1234 ANYTOWN CA", vendor: IHOP, category: Dining, subcategory: Restaurants, source: vendor_rule}
+
+  # delivery
+  - {desc: "DOORDASH*SAMPLE CAFE 855-555-0100 CA", vendor: DoorDash, category: Dining, subcategory: Delivery, source: vendor_rule}
+  - {desc: "UBER *EATS HELP.UBER.COM CA", vendor: Uber Eats, category: Dining, subcategory: Delivery, source: vendor_rule}
+  - {desc: "GRUBHUB*SAMPLEPIZZA 877-555-0100 NY", vendor: Grubhub, category: Dining, subcategory: Delivery, source: vendor_rule}
+
+  # fuel and charging
+  - {desc: "SHELL OIL 57444212500 ANYTOWN OH", vendor: Shell, category: Transport, subcategory: Fuel, source: vendor_rule}
+  - {desc: "EXXONMOBIL 47012345 ANYTOWN NJ", vendor: ExxonMobil, category: Transport, subcategory: Fuel, source: vendor_rule}
+  - {desc: "MOBIL 0123456 ANYTOWN NY", vendor: Mobil, category: Transport, subcategory: Fuel, source: vendor_rule}
+  - {desc: "COSTCO GAS #0123 ANYTOWN WA", vendor: Costco Gas, category: Transport, subcategory: Fuel, source: vendor_rule}
+  - {desc: "CHARGEPOINT 408-555-0100 CA", vendor: ChargePoint, category: Transport, subcategory: Fuel, source: vendor_rule}
+  - {desc: "ELECTRIFY AMERICA 833-555-0100 VA", vendor: Electrify America, category: Transport, subcategory: Fuel, source: vendor_rule}
+
+  # car care
+  - {desc: "JIFFY LUBE #1234 ANYTOWN OH", vendor: Jiffy Lube, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "VALVOLINE INSTANT OIL 1234 ANYTOWN KY", vendor: Valvoline, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "PEP BOYS #1234 ANYTOWN PA", vendor: Pep Boys, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "AUTOZONE #1234 ANYTOWN TN", vendor: AutoZone, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "O'REILLY AUTO PARTS #1234 ANYTOWN MO", vendor: "O'Reilly Auto Parts", category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "ADVANCE AUTO PARTS #1234 ANYTOWN VA", vendor: Advance Auto Parts, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "DISCOUNT TIRE 1234 ANYTOWN AZ", vendor: Discount Tire, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+  - {desc: "SAFELITE AUTOGLASS 877-555-0100 OH", vendor: Safelite, category: Transport, subcategory: Car Maintenance, source: vendor_rule}
+
+  # rideshare, rail and parking
+  - {desc: "UBER *TRIP HELP.UBER.COM CA", vendor: Uber, category: Transport, subcategory: Rideshare, source: vendor_rule}
+  - {desc: "LYFT *RIDE SUN 10AM", vendor: Lyft, category: Transport, subcategory: Rideshare, source: vendor_rule}
+  - {desc: "AMTRAK .COM 1234567890123", vendor: Amtrak, category: Travel, subcategory: Other, source: vendor_rule}
+  - {desc: "SPOTHERO 312-555-0100 IL", vendor: SpotHero, category: Transport, subcategory: Parking/Tolls, source: vendor_rule}
+  - {desc: "PARKMOBILE 877-555-0100 GA", vendor: ParkMobile, category: Transport, subcategory: Parking/Tolls, source: vendor_rule}
+
+  # travel
+  - {desc: "DELTA AIR 0062345678901", vendor: Delta Air Lines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "DELTA AIR LINES ANYTOWN", vendor: Delta Air Lines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "UNITED AIRLINES 800-555-0100 IL", vendor: United Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "UNITED.COM 800-555-0100 IL", vendor: United Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "AMERICAN AIRLINES 0012345678901", vendor: American Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "SOUTHWES 5262345678901", vendor: Southwest Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "SOUTHWEST AIRLINES 800-555-0100", vendor: Southwest Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "JETBLUE 2792345678901", vendor: JetBlue, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "ALASKA AIR 0272345678901", vendor: Alaska Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "FRONTIER AIRLINES 801-555-0100 CO", vendor: Frontier Airlines, category: Travel, subcategory: Flights, source: vendor_rule}
+  - {desc: "COURTYARD BY MARRIOTT ANYTOWN", vendor: Marriott, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "HILTON GARDEN INN ANYTOWN", vendor: Hilton, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "HAMPTON INN ANYTOWN", vendor: Hampton Inn, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "HOLIDAY INN EXPRESS ANYTOWN", vendor: Holiday Inn, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "BEST WESTERN SAMPLE INN", vendor: Best Western, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "MOTEL 6 #1234 ANYTOWN", vendor: Motel 6, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "AIRBNB HMABCDEFGH 415-555-0100 CA", vendor: Airbnb, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "BOOKING.COM HOTEL 888-555-0100", vendor: Booking.com, category: Travel, subcategory: Lodging, source: vendor_rule}
+  - {desc: "EXPEDIA 7012345678901 EXPEDIA.COM WA", vendor: Expedia, category: Travel, source: vendor_rule}
+  - {desc: "HERTZ RENT-A-CAR ANYTOWN", vendor: Hertz, category: Travel, subcategory: Other, source: vendor_rule}
+  - {desc: "ENTERPRISE RENT-A-CAR ANYTOWN", vendor: Enterprise Rent-A-Car, category: Travel, subcategory: Other, source: vendor_rule}
+  - {desc: "AVIS RENT A CAR ANYTOWN", vendor: Avis, category: Travel, subcategory: Other, source: vendor_rule}
+  - {desc: "BUDGET RENT A CAR ANYTOWN", vendor: Budget Car Rental, category: Travel, subcategory: Other, source: vendor_rule}
+  - {desc: "ALAMO RENT-A-CAR ANYTOWN", vendor: Alamo Rent a Car, category: Travel, subcategory: Other, source: vendor_rule}
+  - {desc: "NATIONAL CAR RENTAL ANYTOWN", vendor: National Car Rental, category: Travel, subcategory: Other, source: vendor_rule}
+
+  # pharmacies, labs, dental and eye care
+  - {desc: "CVS/PHARMACY #01234 ANYTOWN MA", vendor: CVS Pharmacy, category: Health, subcategory: Pharmacy, source: vendor_rule}
+  - {desc: "WALGREENS #12345 ANYTOWN IL", vendor: Walgreens, category: Health, subcategory: Pharmacy, source: vendor_rule}
+  - {desc: "QUEST DIAGNOSTICS 866-555-0100 NJ", vendor: Quest Diagnostics, category: Health, subcategory: Medical, source: vendor_rule}
+  - {desc: "LABCORP 800-555-0100 NC", vendor: Labcorp, category: Health, subcategory: Medical, source: vendor_rule}
+  - {desc: "ASPEN DENTAL ANYTOWN NY", vendor: Aspen Dental, category: Health, subcategory: Dental, source: vendor_rule}
+  - {desc: "LENSCRAFTERS #1234 ANYTOWN", vendor: LensCrafters, category: Health, subcategory: Medical, source: vendor_rule}
+  - {desc: "WARBY PARKER 888-555-0100 NY", vendor: Warby Parker, category: Health, subcategory: Medical, source: vendor_rule}
+  - {desc: "1-800 CONTACTS 800-555-0100 UT", vendor: 1-800 Contacts, category: Health, subcategory: Medical, source: vendor_rule}
+
+  # personal care
+  - {desc: "ULTA #1234 ANYTOWN MI", vendor: Ulta Beauty, category: Personal Care, subcategory: Hair/Beauty, source: vendor_rule}
+  - {desc: "SEPHORA #1234 ANYTOWN", vendor: Sephora, category: Personal Care, subcategory: Hair/Beauty, source: vendor_rule}
+  - {desc: "SALLY BEAUTY #1234 ANYTOWN", vendor: Sally Beauty, category: Personal Care, subcategory: Hair/Beauty, source: vendor_rule}
+  - {desc: "BATH & BODY WORKS #1234 ANYTOWN", vendor: "Bath & Body Works", category: Personal Care, subcategory: Other, source: vendor_rule}
+  - {desc: "GREAT CLIPS #1234 ANYTOWN", vendor: Great Clips, category: Personal Care, subcategory: Hair/Beauty, source: vendor_rule}
+  - {desc: "SUPERCUTS #1234 ANYTOWN", vendor: Supercuts, category: Personal Care, subcategory: Hair/Beauty, source: vendor_rule}
+  - {desc: "EUROPEAN WAX CENTER ANYTOWN", vendor: European Wax Center, category: Personal Care, subcategory: Hair/Beauty, source: vendor_rule}
+
+  # home improvement and home services
+  - {desc: "THE HOME DEPOT #1234 ANYTOWN", vendor: The Home Depot, category: Housing, subcategory: Home Improvement, source: vendor_rule}
+  - {desc: "LOWES #01234* ANYTOWN NC", vendor: "Lowe's", category: Housing, subcategory: Home Improvement, source: vendor_rule}
+  - {desc: "ACE HARDWARE #12345 ANYTOWN", vendor: Ace Hardware, category: Housing, subcategory: Home Improvement, source: vendor_rule}
+  - {desc: "HARBOR FREIGHT TOOLS 123 ANYTOWN", vendor: Harbor Freight, category: Housing, subcategory: Home Improvement, source: vendor_rule}
+  - {desc: "SHERWIN-WILLIAMS #1234 ANYTOWN", vendor: Sherwin-Williams, category: Housing, subcategory: Home Improvement, source: vendor_rule}
+  - {desc: "TERMINIX 901-555-0100 TN", vendor: Terminix, category: Housing, subcategory: Home Services, source: vendor_rule}
+  - {desc: "ORKIN #123 ANYTOWN", vendor: Orkin, category: Housing, subcategory: Home Services, source: vendor_rule}
+  - {desc: "ADT SECURITY SERVICES 800-555-0100 FL", vendor: ADT, category: Housing, subcategory: Home Services, source: vendor_rule}
+  - {desc: "SIMPLISAFE 888-555-0100 MA", vendor: SimpliSafe, category: Housing, subcategory: Home Services, source: vendor_rule}
+
+  # general retail
+  - {desc: "BEST BUY 00012345 ANYTOWN MN", vendor: Best Buy, category: Shopping, subcategory: Electronics, source: vendor_rule}
+  - {desc: "APPLE STORE #R123 ANYTOWN", vendor: Apple Store, category: Shopping, subcategory: Electronics, source: vendor_rule}
+  - {desc: "APPLE.COM/US 800-555-0100 CA", vendor: Apple Store, category: Shopping, subcategory: Electronics, source: vendor_rule}
+  - {desc: "B&H PHOTO 800-555-0100 NY", vendor: B&H Photo, category: Shopping, subcategory: Electronics, source: vendor_rule}
+  - {desc: "IKEA ANYTOWN", vendor: IKEA, category: Shopping, subcategory: Home Goods, source: vendor_rule}
+  - {desc: "WAYFAIR*1234567 800-555-0100 MA", vendor: Wayfair, category: Shopping, subcategory: Home Goods, source: vendor_rule}
+  - {desc: "POTTERY BARN #1234 ANYTOWN", vendor: Pottery Barn, category: Shopping, subcategory: Home Goods, source: vendor_rule}
+  - {desc: "WILLIAMS-SONOMA #123 ANYTOWN", vendor: Williams-Sonoma, category: Shopping, subcategory: Home Goods, source: vendor_rule}
+  - {desc: "CRATE & BARREL #123 ANYTOWN", vendor: "Crate & Barrel", category: Shopping, subcategory: Home Goods, source: vendor_rule}
+  - {desc: "HOMEGOODS #1234 ANYTOWN", vendor: HomeGoods, category: Shopping, subcategory: Home Goods, source: vendor_rule}
+  - {desc: "FIVE BELOW 1234 ANYTOWN", vendor: Five Below, category: Shopping, source: vendor_rule}
+  - {desc: "OFFICE DEPOT #1234 ANYTOWN", vendor: Office Depot, category: Shopping, source: vendor_rule}
+  - {desc: "DICK'S SPORTING GOODS #123 ANYTOWN", vendor: "Dick's Sporting Goods", category: Shopping, source: vendor_rule}
+
+  # clothing, shoes and department stores
+  - {desc: "MACY'S #123 ANYTOWN", vendor: "Macy's", category: Shopping, source: vendor_rule}
+  - {desc: "KOHLS #1234 ANYTOWN", vendor: "Kohl's", category: Shopping, source: vendor_rule}
+  - {desc: "JCPENNEY 1234 ANYTOWN", vendor: JCPenney, category: Shopping, source: vendor_rule}
+  - {desc: "NORDSTROM RACK #0123 ANYTOWN", vendor: Nordstrom Rack, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "NORDSTROM #0123 ANYTOWN", vendor: Nordstrom, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "TJ MAXX #1234 ANYTOWN", vendor: T.J. Maxx, category: Shopping, source: vendor_rule}
+  - {desc: "MARSHALLS #1234 ANYTOWN", vendor: Marshalls, category: Shopping, source: vendor_rule}
+  - {desc: "ROSS STORES #1234 ANYTOWN", vendor: Ross Dress for Less, category: Shopping, source: vendor_rule}
+  - {desc: "BURLINGTON STORES 1234 ANYTOWN", vendor: Burlington, category: Shopping, source: vendor_rule}
+  - {desc: "OLD NAVY US 1234 ANYTOWN", vendor: Old Navy, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "BANANA REPUBLIC #1234 ANYTOWN", vendor: Banana Republic, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "NIKE.COM 800-555-0100 OR", vendor: Nike, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "ADIDAS US ONLINE 800-555-0100 OR", vendor: adidas, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "UNDER ARMOUR #123 ANYTOWN", vendor: Under Armour, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "FOOT LOCKER #01234 ANYTOWN", vendor: Foot Locker, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "AMERICAN EAGLE OUTFTRS 0123 ANYTOWN", vendor: American Eagle, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "LULULEMON ATHLETICA ANYTOWN", vendor: lululemon, category: Shopping, subcategory: Clothing, source: vendor_rule}
+  - {desc: "VICTORIA'S SECRET #1234 ANYTOWN", vendor: "Victoria's Secret", category: Shopping, subcategory: Clothing, source: vendor_rule}
+
+  # books, games and hobbies
+  - {desc: "MICHAELS STORES 1234 ANYTOWN", vendor: Michaels, category: Entertainment, subcategory: Hobbies, source: vendor_rule}
+  - {desc: "HOBBY-LOBBY #123 ANYTOWN", vendor: Hobby Lobby, category: Entertainment, subcategory: Hobbies, source: vendor_rule}
+  - {desc: "BARNES & NOBLE #1234 ANYTOWN", vendor: "Barnes & Noble", category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "GAMESTOP #1234 ANYTOWN", vendor: GameStop, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "AUDIBLE*AB1CD2EF3 AMZN.COM/BILL NJ", vendor: Audible, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "KINDLE SVCS*AB1CD2EF3 888-555-0100 WA", vendor: Kindle, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "NINTENDO OF AMERICA 800-555-0100 WA", vendor: Nintendo, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "PLAYSTATION NETWORK 800-555-0100 CA", vendor: PlayStation, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "MICROSOFT*XBOX 800-555-0100 WA", vendor: Xbox, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "STEAMGAMES.COM 4255550100 WA", vendor: Steam, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+  - {desc: "ROBLOX CORPORATION 888-555-0100 CA", vendor: Roblox, category: Entertainment, subcategory: Books/Games, source: vendor_rule}
+
+  # tickets and cinemas
+  - {desc: "TICKETMASTER 800-555-0100 CA", vendor: Ticketmaster, category: Entertainment, subcategory: Events, source: vendor_rule}
+  - {desc: "LIVE NATION ENTERTAINMENT 800-555-0100 CA", vendor: Live Nation, category: Entertainment, subcategory: Events, source: vendor_rule}
+  - {desc: "STUBHUB 866-555-0100 CA", vendor: StubHub, category: Entertainment, subcategory: Events, source: vendor_rule}
+  - {desc: "AMC ONLINE #1234 ANYTOWN", vendor: AMC Theatres, category: Entertainment, subcategory: Events, source: vendor_rule}
+  - {desc: "REGAL CINEMAS 123 ANYTOWN", vendor: Regal, category: Entertainment, subcategory: Events, source: vendor_rule}
+
+  # streaming; a processor's prefix is removed before the patterns are tried
+  - {desc: "NETFLIX.COM 866-555-0100 CA", vendor: Netflix, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "PAYPAL *NETFLIX.COM", vendor: Netflix, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "HULU 877-555-0100 CA", vendor: Hulu, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "DISNEY PLUS 888-555-0100 CA", vendor: Disney+, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "HBO MAX 855-555-0100 NY", vendor: HBO Max, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "MAX.COM 855-555-0100 NY", vendor: HBO Max, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "PARAMOUNTPLUS.COM 888-555-0100 CA", vendor: Paramount+, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "PARAMOUNT+ 888-555-0100 CA", vendor: Paramount+, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "PEACOCK TV LLC 888-555-0100 NY", vendor: Peacock, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "GOOGLE *YOUTUBETV 650-555-0100 CA", vendor: YouTube TV, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "GOOGLE *YOUTUBEPREMIUM 650-555-0100 CA", vendor: YouTube Premium, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "GOOGLE *YOUTUBE VIDEOS 650-555-0100 CA", vendor: YouTube, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "PRIME VIDEO*AB1CD2EF3 888-555-0100 WA", vendor: Prime Video, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "SPOTIFY USA 877-555-0100 NY", vendor: Spotify, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "SIRIUSXM 888-555-0100 NY", vendor: SiriusXM, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+  - {desc: "SLING TV 888-555-0100 CO", vendor: Sling TV, category: Subscriptions, subcategory: Streaming, source: vendor_rule}
+
+  # software and online services
+  - {desc: "APPLE.COM/BILL 866-555-0100 CA", vendor: Apple, category: Subscriptions, source: vendor_rule}
+  - {desc: "GOOGLE *GOOGLE ONE 650-555-0100 CA", vendor: Google One, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "MICROSOFT*MICROSOFT 365 P 800-555-0100 WA", vendor: Microsoft 365, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "DROPBOX*ABCDEFGHIJ 415-555-0100 CA", vendor: Dropbox, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "ADOBE *ACROPRO SUBS 408-555-0100 CA", vendor: Adobe, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "INTUIT *TURBOTAX 800-555-0100 CA", vendor: TurboTax, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "CANVA* I0123456789 NSW", vendor: Canva, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "ZOOM.US 888-555-0100 CA", vendor: Zoom, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "OPENAI *CHATGPT SUBSCR 415-555-0100 CA", vendor: OpenAI, category: Subscriptions, subcategory: Software, source: vendor_rule}
+  - {desc: "DUOLINGO 412-555-0100 PA", vendor: Duolingo, category: Subscriptions, subcategory: Software, source: vendor_rule}
+
+  # memberships
+  - {desc: "AMAZON PRIME*AB1CD2EF3 AMZN.COM/BILL WA", vendor: Amazon Prime, category: Subscriptions, subcategory: Memberships, source: vendor_rule}
+  - {desc: "PATREON* MEMBERSHIP 415-555-0100 CA", vendor: Patreon, category: Subscriptions, subcategory: Memberships, source: vendor_rule}
+
+  # news
+  - {desc: "NYTIMES*NYTIMES.COM 800-555-0100 NY", vendor: The New York Times, category: Subscriptions, subcategory: News/Media, source: vendor_rule}
+  - {desc: "THE NEW YORK TIMES 800-555-0100 NY", vendor: The New York Times, category: Subscriptions, subcategory: News/Media, source: vendor_rule}
+  - {desc: "WALL STREET JOURNAL 800-555-0100 NJ", vendor: The Wall Street Journal, category: Subscriptions, subcategory: News/Media, source: vendor_rule}
+  - {desc: "DOW JONES 800-555-0100 NJ", vendor: Dow Jones, category: Subscriptions, subcategory: News/Media, source: vendor_rule}
+  - {desc: "WASHINGTON POST 800-555-0100 DC", vendor: The Washington Post, category: Subscriptions, subcategory: News/Media, source: vendor_rule}
+  - {desc: "SUBSTACK* SAMPLE NEWSLETTER", vendor: Substack, category: Subscriptions, subcategory: News/Media, source: vendor_rule}
+
+  # telecom
+  - {desc: "VERIZON WIRELESS 800-555-0100 NJ", vendor: Verizon Wireless, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "VZWRLSS*APOCC VISB", vendor: Verizon Wireless, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "VERIZON*RECURRING PAY FIOS", vendor: Verizon, category: Utilities, source: vendor_rule}
+  - {desc: "AT&T*BILL PAYMENT 800-555-0100", vendor: AT&T, category: Utilities, source: vendor_rule}
+  - {desc: "MINT MOBILE 800-555-0100 CA", vendor: Mint Mobile, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "BOOST MOBILE 866-555-0100 CO", vendor: Boost Mobile, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "XFINITY MOBILE 888-555-0100 PA", vendor: Xfinity Mobile, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "T-MOBILE 800-555-0100 WA", vendor: T-Mobile, category: Utilities, source: vendor_rule}
+  - {desc: "CRICKET WIRELESS 800-555-0100 GA", vendor: Cricket Wireless, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "GOOGLE *FI 650-555-0100 CA", vendor: Google Fi, category: Utilities, subcategory: Mobile, source: vendor_rule}
+  - {desc: "COMCAST CABLE COMM 800-555-0100 PA", vendor: Xfinity, category: Utilities, subcategory: Internet, source: vendor_rule}
+  - {desc: "STARLINK INTERNET 888-555-0100 CA", vendor: Starlink, category: Utilities, subcategory: Internet, source: vendor_rule}
+
+  # insurance
+  - {desc: "GEICO *AUTO 800-555-0100 DC", vendor: GEICO, category: Transport, subcategory: Car Insurance, source: vendor_rule}
+  - {desc: "PROGRESSIVE INS 800-555-0100 OH", vendor: Progressive, category: Transport, subcategory: Car Insurance, source: vendor_rule}
+  - {desc: "STATE FARM INSURANCE 800-555-0100 IL", vendor: State Farm, category: Insurance, source: vendor_rule}
+  - {desc: "ALLSTATE INS CO 800-555-0100 IL", vendor: Allstate, category: Insurance, source: vendor_rule}
+  - {desc: "LIBERTY MUTUAL 800-555-0100 MA", vendor: Liberty Mutual, category: Insurance, source: vendor_rule}
+  - {desc: "FARMERS INSURANCE 888-555-0100 CA", vendor: Farmers Insurance, category: Insurance, source: vendor_rule}
+
+  # shipping
+  - {desc: "THE UPS STORE 1234 ANYTOWN", vendor: The UPS Store, category: "Cash & Misc", subcategory: Services, source: vendor_rule}
+  - {desc: "FEDEX OFFICE 1234 ANYTOWN", vendor: FedEx, category: "Cash & Misc", subcategory: Services, source: vendor_rule}
+
+  # fitness
+  - {desc: "PLANET FITNESS ANYTOWN", vendor: Planet Fitness, category: Health, subcategory: Fitness, source: vendor_rule}
+  - {desc: "ANYTIME FITNESS ANYTOWN", vendor: Anytime Fitness, category: Health, subcategory: Fitness, source: vendor_rule}
+  - {desc: "ORANGETHEORY FITNESS ANYTOWN", vendor: Orangetheory Fitness, category: Health, subcategory: Fitness, source: vendor_rule}
+  - {desc: "CLASSPASS 888-555-0100 NY", vendor: ClassPass, category: Health, subcategory: Fitness, source: vendor_rule}
+
+  # pets
+  - {desc: "CHEWY.COM 800-555-0100 FL", vendor: Chewy, category: Pets, source: vendor_rule}
+  - {desc: "PETCO 1234 ANYTOWN", vendor: Petco, category: Pets, source: vendor_rule}
+  - {desc: "PETSMART # 1234 ANYTOWN", vendor: PetSmart, category: Pets, source: vendor_rule}
+  - {desc: "ROVER.COM 888-555-0100 WA", vendor: Rover, category: Pets, source: vendor_rule}
+  - {desc: "TRUPANION 800-555-0100 WA", vendor: Trupanion, category: Pets, source: vendor_rule}
+
+  # childcare and lessons
+  - {desc: "KINDERCARE 1234 ANYTOWN", kind: checking, vendor: KinderCare, category: Kids, subcategory: Childcare, source: vendor_rule}
+  - {desc: "BRIGHT HORIZONS 800-555-0100 MA", kind: checking, vendor: Bright Horizons, category: Kids, subcategory: Childcare, source: vendor_rule}
+  - {desc: "KUMON ANYTOWN", vendor: Kumon, category: Kids, subcategory: Activities, source: vendor_rule}
+
+  # stores that sell everything: the vendor is named, the card issuer's label or the fallback files the row
+  - {desc: "AMAZON.COM*AB1CD2EF3 AMZN.COM/BILL WA", vendor: Amazon, category: Shopping, subcategory: Amazon, source: vendor_rule}
+  - {desc: "AMAZON MKTPL*AB1CD2EF3", bank_category: Home, vendor: Amazon, category: Shopping, subcategory: Amazon, source: vendor_rule}
+  - {desc: "AMZN MKTP US*AB1CD2EF3", vendor: Amazon, category: Shopping, subcategory: Amazon, source: vendor_rule}
+  - {desc: "PAYPAL *EBAY INC", vendor: eBay, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ETSY.COM - SAMPLESHOP", vendor: Etsy, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "WAL-MART #1234 ANYTOWN", bank_category: Groceries, vendor: Walmart, category: Groceries, source: bank_label}
+  - {desc: "WM SUPERCENTER #1234 ANYTOWN", vendor: Walmart, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "TARGET T-1234 ANYTOWN MN", vendor: Target, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "TARGET.COM 800-555-0100 MN", bank_category: Shopping, vendor: Target, category: Shopping, source: bank_label}
+  - {desc: "COSTCO WHSE #0123 ANYTOWN WA", amount: -312.45, vendor: Costco, category: "Cash & Misc", subcategory: Uncategorized, source: fallback, needs_review: true}
+  - {desc: "SAMSCLUB #1234 ANYTOWN", vendor: "Sam's Club", category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "DOLLAR GENERAL #12345 ANYTOWN", vendor: Dollar General, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "DOLLAR TREE #1234 ANYTOWN", vendor: Dollar Tree, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "FAMILY DOLLAR #1234 ANYTOWN", vendor: Family Dollar, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "7-ELEVEN 12345 ANYTOWN VA", bank_category: Gas, vendor: 7-Eleven, category: Transport, subcategory: Fuel, source: bank_label}
+  - {desc: "CIRCLE K 01234 ANYTOWN AZ", vendor: Circle K, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+
+  # look-alikes: a neighbour's name, or a merchant's word inside another word, reaches no pattern
+  - {desc: "TARGET PRACTICE RANGE", vendor: Target Practice Range, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "TARGETED MARKETING CO", vendor: Targeted Marketing Co, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SHELL BEACH CAFE", vendor: Shell Beach Cafe, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SEASHELL GIFT SHOP", vendor: Seashell Gift Shop, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "MOBILE HOME SUPPLY", bank_category: Home, vendor: Mobile Home Supply, category: Housing, source: bank_label}
+  - {desc: "DELTA DENTAL OF ANYTOWN", bank_category: Health & Wellness, vendor: Delta Dental Of Anytown, category: Health, source: bank_label}
+  - {desc: "DELTA AIR CONDITIONING", vendor: Delta Air Conditioning, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "UNITED WAY OF ANYTOWN", bank_category: Gifts & Donations, vendor: United Way Of Anytown, category: Giving, source: bank_label}
+  - {desc: "UNITED RENTALS #123 ANYTOWN", vendor: United Rentals Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "AMERICAN AIR FILTER CO", vendor: American Air Filter Co, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "AMERICAN RED CROSS", bank_category: Gifts & Donations, vendor: American Red Cross, category: Giving, source: bank_label}
+  - {desc: "SOUTHWEST GAS CORP", kind: checking, amount: -85, vendor: Southwest Gas Corp, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "FRONTIER COMMUNICATIONS", bank_category: Bills & Utilities, vendor: Frontier Communications, category: Utilities, source: bank_label}
+  - {desc: "SAMPLE INN HILTON HEAD SC", bank_category: Travel, vendor: Sample Inn Hilton Head, category: Travel, source: bank_label}
+  - {desc: "SAMPLE DINER BURLINGTON VT", vendor: Sample Diner Burlington Vt, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ALAMO PLUMBING SUPPLY", vendor: Alamo Plumbing Supply, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "BUDGET BLINDS OF ANYTOWN", vendor: Budget Blinds Of Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ENTERPRISE PLUMBING CO", vendor: Enterprise Plumbing Co, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "STEAM CLEAN CARPETS", vendor: Steam Clean Carpets, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ZOOM CAR WASH", vendor: Zoom Car Wash, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "APPLE ORCHARD FARM STAND", vendor: Apple Orchard Farm Stand, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "BIG APPLE BAGELS", bank_category: Food & Drink, vendor: Big Apple Bagels, category: Dining, source: bank_label}
+  - {desc: "PEACOCK INDIAN CUISINE", vendor: Peacock Indian Cuisine, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "PARAMOUNT THEATRE", bank_category: Entertainment, vendor: Paramount Theatre, category: Entertainment, source: bank_label}
+  - {desc: "DISNEY ON ICE", vendor: Disney On Ice, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "PRIME TIME BARBERSHOP", vendor: Prime Time Barbershop, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "AMAZONIA RESTAURANT", vendor: Amazonia Restaurant, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "AMAZON TILE AND STONE", vendor: Amazon Tile And Stone, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "GOOGLE *GOOGLE PLAY", vendor: "Google *Google Play", category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ADOBE BRICK SUPPLY", vendor: Adobe Brick Supply, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "CANVAS FRAMING STUDIO", vendor: Canvas Framing Studio, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "MAX MUSCLE NUTRITION", vendor: Max Muscle Nutrition, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "NEW YORK DELI", vendor: New York Deli, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "WALL STREET DELI", vendor: Wall Street Deli, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "PETCOMFORT GROOMING", vendor: Petcomfort Grooming, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "CHEWY'S TAFFY SHOP", vendor: "Chewy's Taffy Shop", category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "MICHAELS AUTO REPAIR", bank_category: Automotive, vendor: Michaels Auto Repair, category: Transport, subcategory: Car Maintenance, source: bank_label}
+  - {desc: "LOWES FOODS #123 ANYTOWN", bank_category: Groceries, vendor: Lowes Foods Anytown, category: Groceries, source: bank_label}
+  - {desc: "ACE CASH EXPRESS", vendor: Ace Cash Express, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "MINT JULEP BAR", vendor: Mint Julep Bar, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "BOOST JUICE BAR", vendor: Boost Juice Bar, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "CRICKET PRO SHOP", vendor: Cricket Pro Shop, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "TACO TRUCK ANYTOWN", bank_category: Food & Drink, vendor: Taco Truck Anytown, category: Dining, source: bank_label}
+  - {desc: "BELL TOWER CAFE", vendor: Bell Tower Cafe, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "KINGS BURGER GRILL", vendor: Kings Burger Grill, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "CHIPOTLE PEPPER SPICE CO", vendor: Chipotle Pepper Spice Co, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "DOMINO SUGAR OUTLET", vendor: Domino Sugar Outlet, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "OLIVE TREE MARKET", vendor: Olive Tree Market, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "PANDA GARDEN BUFFET", vendor: Panda Garden Buffet, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "FIVE STAR CLEANERS", vendor: Five Star Cleaners, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "QUEEN CITY NAILS", bank_category: Personal, vendor: Queen City Nails, category: Personal Care, source: bank_label}
+  - {desc: "SONIC CAR WASH", vendor: Sonic Car Wash, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "CIRCLE DRIVE IN THEATER", vendor: Circle Drive In Theater, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "WESTERN WEAR OUTLET", vendor: Western Wear Outlet, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "TRADERS POINT CAFE", vendor: Traders Point Cafe, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "LIBERTY TAX SERVICE", bank_category: Professional Services, vendor: Liberty Tax Service, category: "Cash & Misc", subcategory: Services, source: bank_label}
+  - {desc: "FARMERS MARKET ANYTOWN", vendor: Farmers Market Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "STATE FAIR TICKETS", vendor: State Fair Tickets, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "JIFFY MART #12", vendor: Jiffy Mart, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "DISCOUNT LIQUORS", vendor: Discount Liquors, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "O'REILLY LAW OFFICE", vendor: "O'Reilly Law Office", category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SAFE HARBOR MARINA", vendor: Safe Harbor Marina, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ROSS DENTAL GROUP", bank_category: Health & Wellness, vendor: Ross Dental Group, category: Health, source: bank_label}
+  - {desc: "BANANA LEAF THAI", vendor: Banana Leaf Thai, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "LOWES MARKET #123 ANYTOWN TX", vendor: Lowes Market Anytown Tx, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "LOWE'S PAY AND SAVE ANYTOWN TX", vendor: "Lowe's Pay And Save", category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "DELTA AIR HEATING & COOLING", vendor: Delta Air Heating &, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SOUTHWEST AIR CONDITIONING", vendor: Southwest Air Conditioning, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ALASKA AIR CONDITIONING INC", vendor: Alaska Air Conditioning Inc, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "AMERICAN EAGLE MOVING CO", vendor: American Eagle Moving Co, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "BEST BUY FURNITURE ANYTOWN", vendor: Best Buy Furniture Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "BEST BUY AUTO SALES", vendor: Best Buy Auto Sales, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "UBER CUTS BARBERSHOP", vendor: Uber Cuts Barbershop, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "MOBIL 1 LUBE EXPRESS", vendor: Mobil 1 Lube Express, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "VICTORIA BAKERY", vendor: Victoria Bakery, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "HOBBY SHOP ANYTOWN", vendor: Hobby Shop Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "POTTERY STUDIO ANYTOWN", vendor: Pottery Studio Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SONOMA GRILL", vendor: Sonoma Grill, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "LIVE OAK GRILL", vendor: Live Oak Grill, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "REGAL NAILS", vendor: Regal Nails, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "PLANET SMOOTHIE", vendor: Planet Smoothie, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ANYTIME PLUMBING", vendor: Anytime Plumbing, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "QUEST FITNESS CLUB", vendor: Quest Fitness Club, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "ASPEN GROVE CAFE", vendor: Aspen Grove Cafe, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "FAMILY DENTAL CARE", vendor: Family Dental Care, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "GENERAL STORE ANYTOWN", vendor: General Store Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "DOLLAR DAYS ANYTOWN", vendor: Dollar Days Anytown, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SAM'S BARBERSHOP", vendor: "Sam's Barbershop", category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "LITTLE GYM OF ANYTOWN", bank_category: Education, vendor: Little Gym Of Anytown, category: Kids, subcategory: School, source: bank_label}
+
+  # the person-to-person catch-all: a keyword rule outranks the card issuer's label, and reviews from the threshold up
+  - {desc: "VENMO PAYMENT 1234567", kind: checking, amount: -30, vendor: Venmo Payment, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword}
+  - {desc: "ZELLE PAYMENT TO SAMPLE ROBIN", kind: checking, amount: -300, vendor: Zelle Payment To Sample, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "VENMO *SAMPLE ROBIN", amount: -45, bank_category: Shopping, vendor: "Venmo *Sample Robin", category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword}
+
+  # a payment to a person who shares a merchant's name still reaches the catch-all, and reviews
+  - {desc: "ZELLE PAYMENT TO JOHN MARRIOTT", kind: checking, amount: -300, vendor: Zelle Payment To John, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "ZELLE PAYMENT TO JANE NORDSTROM", kind: checking, amount: -300, vendor: Zelle Payment To Jane, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "ZELLE PAYMENT TO MARY WALGREEN", kind: checking, amount: -300, vendor: Zelle Payment To Mary, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "VENMO *DAVID ORKIN", kind: checking, amount: -300, vendor: "Venmo *David Orkin", category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "ZELLE PAYMENT TO SEPHORA JEAN", kind: checking, amount: -300, vendor: Zelle Payment To Sephora, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "ZELLE PAYMENT TO JIMMY JOHNS", kind: checking, amount: -300, vendor: Zelle Payment To Jimmy, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "ZELLE PAYMENT TO SHERWIN WILLIAMS", kind: checking, amount: -300, vendor: Zelle Payment To Sherwin, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+  - {desc: "ZELLE PAYMENT FROM PAT DUNKIN", kind: checking, amount: -300, vendor: Zelle Payment From Pat, category: "Cash & Misc", subcategory: Venmo/Zelle Unknown, source: keyword, needs_review: true}
+
+  # the card issuer's label for a merchant no pattern names, and the fallback on each side of the review threshold
+  - {desc: "LATE FEE", bank_category: Fees & Adjustments, vendor: Late Fee, category: "Fees & Interest", source: bank_label}
+  - {desc: "SAMPLE HARDWARE CO", amount: -249.99, vendor: Sample Hardware Co, category: "Cash & Misc", subcategory: Uncategorized, source: fallback}
+  - {desc: "SAMPLE FURNITURE GALLERY", amount: -250, vendor: Sample Furniture Gallery, category: "Cash & Misc", subcategory: Uncategorized, source: fallback, needs_review: true}
+
+  # rows that are not purchases take their category from their type, whatever the rulebook says
+  - {desc: "PAYROLL SAMPLE EMPLOYER", kind: checking, type: income, amount: 2500, vendor: Payroll Sample Employer, category: Income, source: type_default}
+  - {desc: "FOREIGN TRANSACTION FEE", type: fee, amount: -3.5, vendor: Foreign Transaction Fee, category: "Fees & Interest", source: type_default}

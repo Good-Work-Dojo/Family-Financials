@@ -1,0 +1,4 @@
+docs/dev/** export-ignore
+docs/dev export-ignore
+tools/private/** export-ignore
+tools/private export-ignore

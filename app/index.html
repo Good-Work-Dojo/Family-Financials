@@ -1,0 +1,33 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Additional terms: see NOTICE -->
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Family Financials</title>
+
+    <!-- Served from /srv/public with the sign-in page (deploy/Dockerfile.web, deploy/Caddyfile), not the Vite bundle;
+         the demo site stages its own copies beside the page (tools/verify/demo_site.sh). These 404 under `npm run dev`.
+         Every address is relative to the page, so the demo site works under any sub-path; the dashboard's page is
+         served at /, where they name the same files. -->
+    <link rel="icon" type="image/svg+xml" href="./icons/icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./icons/favicon-16.png" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="manifest" href="./site.webmanifest" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="apple-mobile-web-app-title" content="Family Financials" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <!-- The saved theme before the first paint: a plain blocking script from a file (build/theme.js, served by
+         build/themeScript.ts), since the content-security policy allows no inline script or style here. vite-ignore
+         keeps Vite from bundling it; the built page loads the same file the same way. -->
+    <script vite-ignore src="./theme.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Charles Schwab Bank checking: the transaction history download in CSV.
+#
+# One header line, then one row per transaction, every cell quoted: the date (MM/DD/YYYY), its status, Schwab's own
+# type, a check's number, the description, the amount in one of two columns, Withdrawal for money out and Deposit for
+# money in, each written with a dollar sign and no sign of its own, and the running balance. An older layout of this
+# download, with lines above its header and other column names, is not this format: such a file is refused by its
+# first line.
+#
+# The sign: a withdrawal is money out and a deposit money in, so the two columns are read as a debit and a credit column
+# (a withdrawal stored negative). csv2ofx types a row whose Withdrawal cell holds an amount as a debit and any other as
+# a credit, taking the amount from whichever of the two holds it; its test file shows every amount unsigned. A row
+# with a sign in either cell, or an amount in both, is skipped with its reason, never guessed.
+#
+# csv2ofx reads only the rows whose Status is Posted; this format skips a row whose Status is Pending and reads the
+# rest. The running balance is not read: one test file is the only word on the order of the rows, which a balance
+# must follow.
+id: schwab_checking
+label: Charles Schwab Bank checking
+kind: bank
+source: >-
+  csv2ofx (MIT licence): the mapping csv2ofx/mappings/schwabchecking.py (a header line; the Date, Status, CheckNumber,
+  Description, Withdrawal, Deposit and RunningBalance columns; only Posted rows read; a row is a debit when its
+  Withdrawal cell holds an amount, else a credit), https://github.com/reubano/csv2ofx/blob/master/csv2ofx/mappings/schwabchecking.py,
+  and its test file data/test/schwab-checking.csv (the header Date, Status, Type, CheckNumber, Description,
+  Withdrawal, Deposit, RunningBalance; dates MM/DD/YYYY; amounts with a dollar sign and no sign),
+  https://github.com/reubano/csv2ofx/blob/master/data/test/schwab-checking.csv. Both read 2026-11-16.
+evidence: oss-definition
+institution: Charles Schwab Bank
+download: On the bank's website, open the account's activity and download its transactions as a CSV file.
+detect:
+  header: [Date, Status, Type, CheckNumber, Description, Withdrawal, Deposit, RunningBalance]
+date: {column: Date, format: "%m/%d/%Y"}
+amount: {debit: Withdrawal, credit: Deposit}
+description: {columns: [Description]}
+bank_type: Type
+skip:
+  pending: {column: Status, equals: Pending}

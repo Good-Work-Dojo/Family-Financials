@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Thresholds the engine uses to pair transfers between your own accounts and to decide what goes to the Review
+# inbox. Amounts are dollars; each value here is the engine's own default, written out to be tuned.
+
+# how many business days apart the two legs of a transfer between your own accounts may post
+match_window_bdays: 3
+# the same window when one leg is a payment-app transfer (Venmo, Zelle), which can take longer to land
+venmo_match_window_bdays: 5
+# a person-to-person payment the rules cannot place goes to review from this amount up
+venmo_review_threshold: 200
+# a purchase no rule places (Cash & Misc / Uncategorized) goes to review from this amount up
+uncategorized_review_threshold: 250
+# a deposit no income rule recognises goes to review, as income, from this amount up
+unknown_credit_review_threshold: 500
+# the smallest amount two rows no rule explains are paired at as a transfer between your own accounts
+generic_min_amount: 20
+
+coverage:
+  # rates and averages start at the first month by which at least this share of your everyday accounts (the ones
+  # that carry spending and income) that have any transaction have had their first one
+  min_share: 0.6
+
+# Where the dashboard's projections start; each can also be changed in the app. All are percents, and each value
+# here is the engine's default for a key you leave out.
+projections:
+  # the yearly investment returns the retirement projection compares, from cautious to hopeful
+  return_scenarios_pct: [5, 7, 9]
+  # how fast prices rise in a year, listed with the other assumptions on the Data page
+  inflation_pct: 3.0
+  # the share of retirement savings drawn each year: with your spending it sets how much savings retirement needs
+  withdrawal_rate_pct: 4.0
+  # the tax on long-term capital gains, which the second-house worksheet takes off investments sold to pay for it
+  ltcg_pct: 15.0
+  # your state's income tax rate: 0 until you set your own state's rate
+  state_income_tax_pct: 0.0

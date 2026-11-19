@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Additional terms: see NOTICE -->
+<!-- The sign-in page, served at /login without a session (deploy/Caddyfile), from a directory that holds only it, its
+     two files, the icons and the web manifest. No inline script, style or event handler: the content-security policy
+     allows none. The form posts by itself; login.js only adds the messages and the focus. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Family Financials</title>
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)" />
+    <meta name="apple-mobile-web-app-title" content="Family Financials" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <link rel="stylesheet" href="/login.css" />
+    <script src="/login.js" defer></script>
+  </head>
+  <body>
+    <main class="card">
+      <img class="logo" src="/icons/icon.svg" alt="" width="56" height="56" />
+      <h1>Family Financials</h1>
+      <form id="sign-in" method="post" action="/auth/login">
+        <label for="passcode">Passcode</label>
+        <input id="passcode" name="passcode" type="password" autocomplete="current-password" autocapitalize="off"
+               autocorrect="off" spellcheck="false" required aria-describedby="message" />
+        <button type="submit">Sign in</button>
+      </form>
+      <p id="message" class="message" role="status"></p>
+    </main>
+    <!-- Whose the program is, its licence and where its source is: the lines NOTICE asks this page to keep, as
+         Settings' About card says them. The web image's build points the link at its FF_SOURCE argument
+         (deploy/source_link.sh), so a fork's build links to the fork. -->
+    <footer class="legal">
+      <p>© 2026 Jeremy Sapriel</p>
+      <p>Free software under the GNU AGPL 3.0, with no warranty</p>
+      <p><a href="https://github.com/Good-Work-Dojo/Family-Financials" target="_blank" rel="noopener noreferrer">Source code</a></p>
+    </footer>
+  </body>
+</html>

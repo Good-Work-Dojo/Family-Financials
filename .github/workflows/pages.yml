@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# The demo site on GitHub Pages: the dashboard built in demo mode over the invented household `full`
+# (tools/verify/demo_site.sh: generated and ingested offline, built with VITE_DEMO=1, checked), published on each
+# release and when run by hand. Both jobs run only while the repository variable FF_PAGES_ENABLED is `true`, so a
+# repository publishes no site until its owner sets it.
+name: pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    if: vars.FF_PAGES_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # the site's addresses are relative to its page (app/vite.config.ts), so the build needs no Pages base path
+      - name: Build the demo site
+        env:
+          # the About card links to the source of what this site runs: this repository
+          VITE_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          ETL="$(docker build -q --target test -f deploy/Dockerfile.etl .)"
+          WEB="$(docker build -q --target web-build -f deploy/Dockerfile.web .)"
+          FF_ETL_IMAGE="$ETL" FF_WEB_IMAGE="$WEB" tools/verify/demo_site.sh "$RUNNER_TEMP/demo"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/demo/site
+  deploy:
+    if: vars.FF_PAGES_ENABLED == 'true'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # the repository's Pages site, read with this job's own Pages token (the build job holds none)
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

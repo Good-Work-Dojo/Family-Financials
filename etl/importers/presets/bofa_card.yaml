@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Bank of America credit card: the transaction download in CSV.
+#
+# One header line, then one row per transaction: the posting date, the bank's reference number, the payee, a fourth
+# column neither definition reads (an address), and the amount. Only the four named columns are required of the header.
+#
+# The sign: a purchase is negative in the file, and a payment or a refund positive, so the amount is read as the file
+# writes it (sign: as_is). bank2actual keeps this export's Amount as written under its own rule that negative is money
+# out, where it flips the American Express export ("positive = charge"); bank2ynab reads the same column as the
+# inflow. A row with no amount is skipped, as bank2actual skips it.
+id: bofa_card
+label: Bank of America credit card
+kind: card
+source: >-
+  bank2actual (MIT licence), bank2actual.py: the "bofa-card" signature (a header holding Posted Date, Reference
+  Number, Payee and Amount) and its reading of a row (the Posted Date, the Payee, the Amount kept as written, a row
+  without an amount skipped), https://github.com/Ildana-ai/bank2actual/blob/main/bank2actual.py; and bank2ynab (MIT
+  licence), bank2ynab/data/bank2ynab.conf, section "US Bank of America Credit Card" (one header line; five columns
+  read as date, skip, memo, skip, inflow; dates %m/%d/%Y),
+  https://github.com/bank2ynab/bank2ynab/blob/develop/bank2ynab/data/bank2ynab.conf. Both read 2026-11-16.
+evidence: oss-definition
+institution: Bank of America
+download: On the bank's website, open the card's activity and download its transactions as a CSV file.
+detect:
+  header: [Posted Date, Reference Number, Payee, Amount]
+date: {column: Posted Date, format: "%m/%d/%Y"}
+amount: {column: Amount, sign: as_is}
+description: {columns: [Payee]}
+skip: {empty_amount: true}

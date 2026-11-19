@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-18T19:42:00Z",
+  "scenarios": [
+    {
+      "id": "6f1c2a90-3b7e-4d15-8a4c-2e9b70f5d1a3",
+      "name": "Shoreline cottage",
+      "created_at": "2026-09-12T14:05:00Z",
+      "updated_at": "2026-10-18T19:42:00Z",
+      "inputs": {
+        "price": 540000,
+        "downPct": 28,
+        "ratePct": 6.25,
+        "closingCosts": 11500,
+        "postMoveInCosts": 7300,
+        "taxPctYr": 1.05,
+        "insuranceYr": 3400,
+        "hoaMo": 85,
+        "utilitiesMo": 310,
+        "maintPctYr": 1.1,
+        "nightlyRate": 285,
+        "occupancyPct": 48,
+        "nightsPerMonth": 27,
+        "platformFeePct": 14,
+        "mgmtFeePct": 12,
+        "cleaningPerStay": 135,
+        "staysPerMonth": 4
+      },
+      "draws": {
+        "demo_checking_0101": 9000,
+        "demo_savings_0202": 86000,
+        "demo_savings_0909": 21000,
+        "demo_brokerage_0505": 54000
+      }
+    },
+    {
+      "id": "b84e07d2-5c19-4f6a-9d3b-71a6c2e0f948",
+      "name": "Woodland cabin",
+      "created_at": "2026-09-20T16:30:00Z",
+      "updated_at": "2026-10-03T21:15:00Z",
+      "inputs": {
+        "price": 395000,
+        "downPct": 22,
+        "ratePct": 5.875,
+        "closingCosts": 8200,
+        "postMoveInCosts": 5400,
+        "taxPctYr": 1.35,
+        "insuranceYr": 2100,
+        "hoaMo": 65,
+        "utilitiesMo": 240,
+        "maintPctYr": 0.85,
+        "nightlyRate": 195,
+        "occupancyPct": 52,
+        "nightsPerMonth": 26,
+        "platformFeePct": 13,
+        "mgmtFeePct": 8,
+        "cleaningPerStay": 110,
+        "staysPerMonth": 7
+      },
+      "draws": {
+        "demo_checking_0101": 23000,
+        "demo_savings_0202": 30000,
+        "demo_brokerage_0505": 47500
+      }
+    }
+  ]
+}

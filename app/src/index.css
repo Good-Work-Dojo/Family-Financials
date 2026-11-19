@@ -1,0 +1,116 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Additional terms: see NOTICE */
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+/* the light theme, keyed on the same class `.light` remaps the ramp under (below): for a colour that has to differ
+   there beyond the remap, such as the code pill's (components/NoData.tsx CODE_PILL) */
+@custom-variant light (&:where(.light, .light *));
+
+/* Fine print (footnotes, "based on:" lines, hints, placeholders) is its own token, not zinc-600, so raising its contrast never
+   moves the hover borders and fills that use zinc-600. At least 4.5:1 on the card and the page in BOTH themes
+   (lib/contrast.test.ts); `.light` below remaps it. */
+@theme {
+  --color-faint: #80808a;
+  /* muted text (zinc-500): Tailwind's own #71717a was about 3.9:1 on a dark card; this is 4.78:1 on the card and 5.09:1
+     on the page. Its few other uses (the active preset's and an "on" pill's borders, the off switch's border, a
+     checkbox's accent, the first-run page's list markers) read the same step, lighter. `.light` declares its own */
+  --color-zinc-500: #80808a;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-zinc-950 text-zinc-200;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+}
+
+/* ───────── Light theme ─────────
+   Tailwind v4 compiles every color utility to var(--color-*), and this app
+   uses the zinc ramp semantically (950 page, 900 cards, 800 borders, …), so
+   remapping the variables re-skins the whole DOM with zero markup changes.
+   Role-mapped, not naively inverted — zinc-500, the muted text, is the pivot: a mid grey in both themes, each theme's
+   own shade of it at least 4.5:1 on its page and its cards (lib/contrast.test.ts).
+   Charts are canvas and get their colors from lib/echarts.ts setChartTheme(). */
+.light {
+  color-scheme: light;
+
+  /* zinc ramp */
+  --color-zinc-950: #f4f4f5;   /* page + sidebar background */
+  --color-zinc-900: #ffffff;   /* cards, inputs, panels */
+  --color-zinc-800: #e4e4e7;   /* hairline borders, chips, active nav */
+  --color-zinc-700: #d4d4d8;   /* control borders */
+  --color-zinc-600: #a1a1aa;   /* hover borders and quiet fills (fine-print text is --color-faint) */
+  --color-zinc-500: #6b6b74;   /* muted text: 4.80:1 on the page, 5.10:1 on a card (Tailwind's #71717a was 4.40:1 on the page) */
+  --color-zinc-400: #52525b;   /* secondary text */
+  --color-zinc-300: #3f3f46;   /* body/input text */
+  --color-zinc-200: #27272a;   /* default body text */
+  --color-zinc-100: #18181b;   /* headings */
+  --color-faint: #6b6b74;      /* fine print: >= 4.5:1 on white cards and the zinc-950 page */
+
+  /* accent chips: bg-*-950 tints with text-*-300 ink */
+  --color-red-950: #fee2e2;
+  --color-amber-950: #fef3c7;
+  --color-emerald-950: #d1fae5;
+  --color-blue-950: #dbeafe;
+  --color-purple-950: #f3e8ff;
+  --color-sky-950: #e0f2fe;
+  --color-pink-950: #fce7f3;
+  --color-red-900: #fecaca;
+  --color-amber-900: #fde68a;
+  --color-emerald-900: #a7f3d0;
+  --color-red-800: #fca5a5;
+  --color-red-700: #f87171;
+  --color-blue-700: #60a5fa;
+  --color-red-300: #b91c1c;
+  --color-amber-300: #92400e;
+  --color-emerald-300: #065f46;
+  --color-blue-300: #1d4ed8;
+  --color-purple-300: #7e22ce;
+  --color-sky-300: #0369a1;
+  --color-pink-300: #be185d;
+  --color-red-200: #991b1b;
+  --color-blue-200: #1e40af;
+
+  /* standalone accent text on white — ≥4.5:1 */
+  --color-red-400: #dc2626;
+  --color-amber-400: #b45309;
+  --color-emerald-400: #047857;
+  --color-blue-400: #2563eb;
+}
+
+.light input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
+/* Home prints as a paginated letter document in whichever theme is active —
+   charts are painted with the matching token colors. */
+@page {
+  size: letter;
+  margin: 10mm;
+}
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body {
+    background: var(--color-zinc-950);
+  }
+  .rounded-xl,
+  table,
+  section > div {
+    break-inside: avoid;
+  }
+}

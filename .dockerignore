@@ -1,0 +1,53 @@
+# The build context is what the two Dockerfiles copy and nothing else: everything is left out, then each path they
+# name is let back in. A household's config, data, store and secrets, the git history and development-only material
+# never enter a build.
+*
+!.dockerignore
+!.env.example
+!.gitattributes
+!.gitignore
+!AGENTS.md
+!CHANGELOG.md
+!CLAUDE.md
+!LICENSE
+!Makefile
+!NOTICE
+!README.md
+!THIRD_PARTY_LICENSES
+!THIRD_PARTY_NOTICES.md
+!compose.yaml
+!ff
+!pyproject.toml
+!uv.lock
+!app
+!deploy
+!etl
+!examples
+!starter
+!tests
+!tools
+# the workflows, Dependabot's settings and the issue forms are tested inside the image
+!.github
+# the documents are tested inside the image: their links, the key reference against the validators' registry, the
+# table of supported banks against the formats, the importers' example preset, the README's pictures
+!CLA.md
+!CODE_OF_CONDUCT.md
+!CONTRIBUTING.md
+!SECURITY.md
+!TRADEMARKS.md
+!docs
+# Inside what is let back in, what never ships: development-only material, installed and built files, caches,
+# environment files (the example aside).
+docs/dev
+tools/private
+app/node_modules
+app/dist
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.DS_Store
+**/.env
+**/.env.*
+!.env.example

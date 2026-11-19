@@ -1,0 +1,76 @@
+# The uid of every row each shipped preset reads from its sample files (tests/importers/samples/<id>/).
+# A stored answer, override or learned rule is keyed by a row's uid, so a preset never changes the uid of
+# a row it reads: a change that does is a new preset, with a new id. A new preset or sample adds its
+# entry by appending what `python tests/test_csv_presets.py` prints (the repository root on PYTHONPATH):
+# it prints only the entries this file lacks, and prints nothing and exits 1 when an entry here would
+# change or go.
+
+bofa_card activity.csv
+tx_c29c2486b72e9847
+tx_9e41a8f9337e3d8b
+tx_b0fdb4fc48fff98d
+tx_5484c415ff5dce0e
+tx_5bc86e681d626efd
+tx_5b98889a3c1de0ba
+tx_d514648a25073a41
+tx_93cb4ff0c568b0c4
+tx_8a07d8104c9b5322
+tx_b62a2b54c7d13207
+tx_ec98de4bf4817af0
+tx_e282b696e00101f8
+
+wells_fargo activity.csv
+tx_fc775b7c88a3b3bc
+tx_bb03dd4f2ebafa7f
+tx_8f257469b23f4b0b
+tx_47cbb8fb0117fe2a
+tx_8cb4abd07f652879
+tx_b9b4ca155d5fcca4
+tx_8b16ce20728c3119
+tx_e9d2f4fab0766c7b
+tx_35a33e336329ab71
+tx_9d717a38f349c05e
+tx_df3d3e6a77295ea9
+tx_0d8976e61de077ad
+
+schwab_checking transactions.csv
+tx_e98ae87ae24cb6c2
+tx_e84829448e0cdc33
+tx_01085756695860bc
+tx_620326de0ea58775
+tx_60fe0e4c18bc7356
+tx_cedcea2ee81bd21e
+tx_d7c43645fedf9bd4
+tx_06889f875119ae83
+tx_c3d2a33801945793
+tx_88f8c0d5c1d35020
+tx_6b0194219c5382ea
+tx_86bbb4c9a02c02f5
+
+capital_one_card transactions.csv
+tx_42d260778dfd52cd
+tx_e07c456318545c4d
+tx_9db06bbfc2356086
+tx_391813832d124266
+tx_bb99e7e054372a03
+tx_10afb691d3623b05
+tx_5513b5fba3e7ffa7
+tx_c5b04e1cb40af860
+tx_8e8f1d3eecf4890c
+tx_257a4ab5b2dc1e29
+tx_89f830757f91bde8
+tx_03c79a7c795e5f76
+
+discover_card activity.csv
+tx_2fd528e9cbb76788
+tx_4d4ddc65e8c3718a
+tx_b32b41424248691e
+tx_e766f6b6e5b3caa4
+tx_9adc61799c8c9903
+tx_8f80826531de6dc4
+tx_248e2fa5f61a1987
+tx_6d081c11c230c375
+tx_4bff27860023944c
+tx_e123c0b63f08acf2
+tx_e48810d8a7b6e387
+tx_b359ebfc88670130

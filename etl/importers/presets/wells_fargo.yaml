@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Wells Fargo bank account: the account activity download in comma-delimited format.
+#
+# No header line: each row is five cells, the date, the signed amount, a cell that holds an asterisk (it marks a posted
+# row), a cell this format does not read (empty, or a check's number), and the description.
+#
+# The shape is this layout's only guard. A file is read only when its first row has exactly five cells and an asterisk
+# alone in the third; a changed layout (a header line above the rows, a column added or dropped, the marker moved or
+# gone) fails that test, so the file is refused with a failing check that says what this format expects, and none of
+# its rows is read. Some of the bank's interfaces add a header row: such a file is refused the same way, never read
+# wrong. A later row of another width, or without the asterisk, is skipped and counted.
+#
+# The sign: money out is negative and money in positive, so the amount is read as the file writes it (sign: as_is).
+# The expense-report README's example rows show a purchase negative and a salary deposit positive, and the Firefly III
+# configuration takes the column as the transaction's amount with no conversion, where a negative amount is money
+# leaving the account.
+id: wells_fargo
+label: Wells Fargo bank account
+kind: bank
+source: >-
+  Three independent public descriptions agree on the layout, and none is a definition under a licence this project
+  can use: the beancount.io Wells Fargo converter page (no header row, though some of the bank's interfaces add one;
+  five columns: the date, the amount, an asterisk marking a posted row, an empty column, the description),
+  https://beancount.io/tools/csv-to-beancount/wells-fargo; the README of
+  au5ton/expense-report (no licence stated; example rows of the checking download: dates MM/DD/YYYY, a purchase
+  negative, a deposit positive, an asterisk in the third cell), https://github.com/au5ton/expense-report; and the
+  Firefly III import configuration for Wells Fargo, default.json in the Wells Fargo folder under the repository's us
+  folder (CC BY-SA 4.0; no header; five columns read as date, amount, ignored, ignored, description; dates m/d/Y; no
+  amount conversion), https://github.com/firefly-iii/import-configurations/tree/main/us. All read 2026-11-16.
+evidence: widely-reported
+institution: Wells Fargo
+download: >-
+  On the bank's website, open the account's activity, choose Download Account Activity and pick the comma-delimited
+  (.csv) format.
+detect:
+  headerless: {columns: 5, constant: {3: "*"}}
+date: {column: 1, format: "%m/%d/%Y"}
+amount: {column: 2, sign: as_is}
+description: {columns: [5]}

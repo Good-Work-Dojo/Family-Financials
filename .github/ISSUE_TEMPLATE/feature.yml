@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+name: Feature request
+description: Something the program could do for a household that it does not do yet.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Say what you want to know or do with your household's money, rather than how the program should do it: that
+        helps find the simplest way. A new bank's statement format has a form of its own ("Bank format request").
+        Never paste real financial data here.
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The question you want answered, or the task you want done, and why it matters to your household.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: A spreadsheet, another program, by hand, or not at all.
+  - type: textarea
+    id: idea
+    attributes:
+      label: An idea of how it could work
+      description: Optional. A page, a card, a command, a setting.
+  - type: checkboxes
+    id: no-real-data
+    attributes:
+      label: Before you send it
+      options:
+        - label: Nothing in this request is real financial data, an account number or a name from my household.
+          required: true

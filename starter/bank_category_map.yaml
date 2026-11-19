@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Additional terms: see NOTICE
+# Card issuers' own category labels -> your taxonomy (category_rules.yaml). A card export that carries a category
+# column files a purchase under the label's entry when no vendor pattern, learned rule or keyword rule placed it
+# first. Each entry is `<label as the export spells it>: {category, subcategory (optional), tags (optional)}`; a
+# label missing here leaves the row to the fallback (Cash & Misc / Uncategorized). Add the labels your issuer uses.
+Food & Drink: {category: Dining}
+Groceries: {category: Groceries}
+Gas: {category: Transport, subcategory: Fuel}
+Travel: {category: Travel}
+Shopping: {category: Shopping}
+Entertainment: {category: Entertainment}
+Health & Wellness: {category: Health}
+Home: {category: Housing}
+Bills & Utilities: {category: Utilities}
+Personal: {category: Personal Care}
+Professional Services: {category: "Cash & Misc", subcategory: Services}
+# school costs; point it at another category when yours are an adult's tuition
+Education: {category: Kids, subcategory: School}
+Automotive: {category: Transport, subcategory: Car Maintenance}
+Gifts & Donations: {category: Giving}
+Fees & Adjustments: {category: "Fees & Interest"}
