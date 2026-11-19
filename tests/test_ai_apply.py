@@ -290,9 +290,12 @@ def test_an_override_runs_after_the_step_and_replaces_its_category(tmp_path, mon
     assert (t.category, t.subcategory, t.category_source) == ("Shopping", "Sample Store", "override")
 
 
-def test_the_stored_answers_never_become_learned_rules_or_answers(tmp_path):
+def test_the_stored_answers_never_become_learned_rules_or_answers(tmp_path, monkeypatch):
     """Ingesting with stored answers applied leaves the learned rules and the answers exactly as ingesting without:
-    the step writes neither, and learned.derive never reads an AI row as evidence."""
+    the step writes neither, and learned.derive never reads an AI row as evidence. The clock is pinned, so the two
+    files' write stamps cannot differ by the second between the two ingests."""
+    monkeypatch.setenv("FF_NOW", "2026-11-18T16:00:00Z")
+
     def ingest(name: str, on: bool) -> tuple[bytes, bytes]:
         cfg = household(tmp_path / name)
         if on:

@@ -910,7 +910,8 @@ def slow_bodies_probe(ctx: Ctx) -> list[str]:
 
 
 def no_published_store(ctx: Ctx) -> list[str]:
-    """The store publishes no port; web publishes the stack's one port on the loopback address."""
+    """The store publishes no port; web publishes the stack's port on the loopback address, and at most the HTTPS port
+    beside it (the next one, which the stack sets as FF_PORT_TLS; a compose wrapper may publish the first port alone)."""
     text = compose(ctx, "ps", "--format", "json").strip()
     rows = json.loads(text) if text.startswith("[") else [json.loads(line) for line in text.splitlines() if line]
     by = {row.get("Service"): row for row in rows}
@@ -922,8 +923,11 @@ def no_published_store(ctx: Ctx) -> list[str]:
         problems.append(f"the store publishes {store_ports}")
     web_ports = [(p.get("URL"), p.get("PublishedPort")) for p in by.get("web", {}).get("Publishers") or []
                  if p.get("PublishedPort")]
-    if not web_ports or any(url != "127.0.0.1" or port != ctx.addr[1] for url, port in web_ports):
-        problems.append(f"web publishes {web_ports}, want 127.0.0.1:{ctx.addr[1]} alone")
+    allowed = {ctx.addr[1], ctx.addr[1] + 1}
+    if (("127.0.0.1", ctx.addr[1]) not in web_ports
+            or any(url != "127.0.0.1" or port not in allowed for url, port in web_ports)):
+        problems.append(f"web publishes {web_ports}, want 127.0.0.1:{ctx.addr[1]} and at most "
+                        f"127.0.0.1:{ctx.addr[1] + 1}")
     return problems
 
 
