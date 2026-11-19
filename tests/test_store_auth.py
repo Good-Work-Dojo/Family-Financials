@@ -953,9 +953,13 @@ def start(home: Path, *args: str, **env: str) -> tuple[subprocess.Popen, int]:
 
 
 def finish(proc: subprocess.Popen) -> str:
-    """Stop the store as docker stop does and return the rest of what it printed."""
+    """Stop the store as docker stop does and return the rest of what it printed. The rest is read through the same
+    text stream `start` read the first line from, so lines that arrived with that first line and wait in its buffer
+    are part of it (communicate() reads the pipe beneath the buffer and would miss them)."""
     proc.terminate()
-    _, rest = proc.communicate(timeout=10)
+    proc.wait(timeout=10)
+    rest = proc.stderr.read()
+    proc.stderr.close()
     assert proc.returncode == 0
     return rest
 
