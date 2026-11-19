@@ -111,6 +111,8 @@ SCRYPT_MAXMEM = 64 * 1024 * 1024
 SALT_BYTES, HASH_BYTES = 16, 32
 MIN_PASSCODE_CHARS = 8
 MIN_DIGITS_PASSCODE_CHARS = 10
+# passcodes printed in the repository's own examples: anyone can read them, so none is ever accepted
+SAMPLE_PASSCODES = frozenset({"replace-this-sample-passcode"})
 # the sign-in body's cap: a passcode must fit in it however the page sends it (form-encoded or as JSON)
 MAX_LOGIN_BYTES = 1024
 _B64 = re.compile(r"[A-Za-z0-9_-]+")
@@ -174,12 +176,15 @@ def label_problem(label: str) -> str | None:
 def passcode_problem(passcode: str) -> str | None:
     """Why `passcode` cannot be a sign-in passcode, or None: at least MIN_PASSCODE_CHARS characters, or
     MIN_DIGITS_PASSCODE_CHARS when every one is a digit (of any script), text a browser can send, and short enough to
-    fit the sign-in body however the page sends it, all of it judged in normal form C. Nothing else is asked of it."""
+    fit the sign-in body however the page sends it, and not a passcode the repository's examples print, all of it
+    judged in normal form C. Nothing else is asked of it."""
     passcode = normal_form(passcode)
     try:
         passcode.encode("utf-8")
     except UnicodeEncodeError:
         return "the passcode holds characters a browser cannot send: type it again"
+    if passcode.strip().casefold() in SAMPLE_PASSCODES:
+        return "that is the example file's sample passcode, which anyone can read: choose one of your own"
     if passcode.isdecimal() and len(passcode) < MIN_DIGITS_PASSCODE_CHARS:
         return f"a passcode of digits only needs at least {MIN_DIGITS_PASSCODE_CHARS} of them"
     if len(passcode) < MIN_PASSCODE_CHARS:

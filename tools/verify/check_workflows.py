@@ -4,7 +4,7 @@
 """Guardrail for .github/workflows: every job runs on a GitHub-hosted runner named by a literal, and every action
 is pinned to a commit.
 
-The organisation's self-hosted runner deploys live services, so a workflow here must never be able to land on it. The
+A workflow here runs on GitHub's own runners only and must never be able to land on a self-hosted one. The
 check is line-based, works on the raw text (no comment or quoting heuristics), and fails closed: it is meant to catch
 a careless or copied workflow, and anything it cannot recognise is reported. The rules:
   * a line mentioning `runs-on` (comments included) must be exactly `<indent>runs-on: ubuntu-24.04` or

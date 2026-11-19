@@ -20,8 +20,9 @@ request or a discussion, and never include real financial data, a passcode, a ba
 key in a report: show the problem with the demo household (`./ff demo`) or with invented values.
 
 Say what an attacker can do, from where (the network, a signed-in browser, a file a household imports), and the steps
-that show it. The maintainers answer within two weeks, agree a date for disclosure with you, and credit you in the
-advisory unless you would rather not be named.
+that show it. This is a volunteer project with no promised response time, but every report is read; the maintainers
+agree a date for disclosure with you before anything is made public, and credit you in the advisory unless you would
+rather not be named.
 
 ## What is in scope
 

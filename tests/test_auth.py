@@ -189,6 +189,8 @@ def test_more_than_eight_lines_in_the_file_are_reported_and_the_first_eight_used
     ("\U0001f600" * 8, True),           # any character
     ("\U0001f600" * 90, False),         # too long to send in the sign-in form
     ("abcdefg\ud800", False),           # text no browser can send
+    ("replace-this-sample-passcode", False),    # the example answers file's, which anyone can read
+    ("Replace-This-Sample-Passcode ", False),   # in any case, with a stray space
 ])
 def test_the_passcode_rules(passcode, ok):
     assert (auth.passcode_problem(passcode) is None) == ok

@@ -130,6 +130,12 @@ def test_the_shipped_example_answers_set_up_a_household_offline_that_validates(h
     copy = home.parent / "ff-answers.yaml"
     copy.write_text(text, "utf-8")
     os.chmod(copy, 0o600)
+    # left unedited, its sample passcode is refused and no passcode is set up
+    assert run(str(copy), offline=True, out=lambda _line: None) != 0
+    assert "sample passcode" in capsys.readouterr().err
+    assert not (home / "secrets" / "web" / "passcodes").exists()
+    # edited as the README says, it sets up the household
+    copy.write_text(text.replace("replace-this-sample-passcode", "a-passcode-of-our-own"), "utf-8")
     out: list[str] = []
     assert run(str(copy), offline=True, out=out.append) == 0, capsys.readouterr().err
     assert out[-1:] != [] and any(line.startswith("config OK") for line in out)
