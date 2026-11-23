@@ -14,7 +14,7 @@ import { PRESET_LABELS } from "../filters/dateRange";
 import { isInvestmentAccount } from "../lib/accounts";
 import { coverageFloorLabel, fullMonths, monthInProgress } from "../lib/agg";
 import { sankeyHeight, sankeyOption } from "../lib/echarts";
-import { countOf, fmtMonth, fmtPct, fmtUSD0 } from "../lib/format";
+import { countOf, fmtMonth, fmtPct, fmtUSD0, wholeDollars } from "../lib/format";
 import { belowRateFloor, lastFullYear, type PnL, PlPreset, plPresetMonths, plWindow, pnl, printableRate, sankeyFlows,
   shortfallText } from "../lib/lifeSummary";
 
@@ -112,15 +112,23 @@ function IncomeStatementPage() {
 
   const incomeRows = ttm.incomeBySub.slice(0, 6).map((l) => l.name);
   const spendRows = ttm.spendByCat.slice(0, 9).map((l) => l.name);
-  const cell = (c: PnL, kind: "income" | "spend", name: string) => {
-    const lines = kind === "income" ? c.incomeBySub : c.spendByCat;
-    return lines.find((l) => l.name === name)?.value ?? 0;
-  };
-  const otherSpend = (c: PnL) =>
-    c.spend - spendRows.reduce((s, n) => s + cell(c, "spend", n), 0);
-  // a row that sums nothing is left out: "Other categories" only when some column has a category the table does not
-  // list, "Invested" only for a household with an investment account or a transfer into one in these windows
-  const hasOther = cols.some((c) => c.spendByCat.some((l) => !spendRows.includes(l.name)));
+  // every figure is printed in whole dollars, and each total is the sum of the whole-dollar figures above it, so a
+  // reader adding a column gets the total shown
+  const value = (c: PnL, kind: "income" | "spend", name: string) =>
+    (kind === "income" ? c.incomeBySub : c.spendByCat).find((l) => l.name === name)?.value ?? 0;
+  const cell = (c: PnL, kind: "income" | "spend", name: string) => wholeDollars(value(c, kind, name));
+  const names = (kind: "income" | "spend") => (kind === "income" ? incomeRows : spendRows);
+  const listed = (c: PnL, kind: "income" | "spend") => names(kind).reduce((s, n) => s + cell(c, kind, n), 0);
+  // what the listed rows leave of a column's total: the streams or categories the table does not list (from the exact
+  // figures, so the listed rows' rounding never lands in it)
+  const other = (c: PnL, kind: "income" | "spend") => wholeDollars((kind === "income" ? c.income : c.spend)
+    - names(kind).reduce((s, n) => s + value(c, kind, n), 0));
+  // a row that sums nothing is left out: an "Other" row only when some column has a remainder the listed rows do not
+  // hold, "Invested" only for a household with an investment account or a transfer into one in these windows
+  const hasOtherIncome = cols.some((c) => other(c, "income") !== 0);
+  const hasOther = cols.some((c) => other(c, "spend") !== 0);
+  const totalIncome = (c: PnL) => listed(c, "income") + other(c, "income");
+  const totalSpend = (c: PnL) => listed(c, "spend") + other(c, "spend");
   const hasInvested = data.accounts.some(isInvestmentAccount) || cols.some((c) => c.invested !== 0);
   // the columns whose rate is below the printable floor (spending over twice the income): their row reads "—", and
   // the line under the table gives each one's shortfall in dollars
@@ -133,7 +141,7 @@ function IncomeStatementPage() {
           Full months through {fmtMonth(lastFull)} — the money-flow graph and the household P&L
           over a selectable window.
         </p>
-        <SegmentToggle value={pl} options={PL_OPTIONS} onChange={setPl} />
+        <SegmentToggle label="Window" value={pl} options={PL_OPTIONS} onChange={setPl} />
       </div>
       <Card testId="card-sankey" title={`Where the money goes — ${pl !== "ytd" && ttm.monthCount < plPresetMonths(pl)
         ? `trailing ${countOf(ttm.monthCount, "month")}` : PL_TITLE[pl]} (${fmtUSD0(ttm.income)} in)`}>
@@ -163,7 +171,15 @@ function IncomeStatementPage() {
                 ))}
               </tr>
             ))}
-            <TotalRow label="Total income" cols={cols} get={(c) => c.income} cls="text-emerald-400" />
+            {hasOtherIncome && (
+              <tr className="border-b border-zinc-800/40">
+                <td className="py-1 pl-2 text-zinc-500">Other income</td>
+                {cols.map((c) => (
+                  <td key={c.label} className="text-right tabular-nums text-zinc-500">{fmtUSD0(other(c, "income"))}</td>
+                ))}
+              </tr>
+            )}
+            <TotalRow label="Total income" cols={cols} get={totalIncome} cls="text-emerald-400" />
             {spendRows.map((name) => (
               <tr key={name} className="border-b border-zinc-800/40">
                 <td className="py-1 pl-2 text-zinc-400">{name}</td>
@@ -176,14 +192,23 @@ function IncomeStatementPage() {
               <tr className="border-b border-zinc-800/40">
                 <td className="py-1 pl-2 text-zinc-500">Other categories</td>
                 {cols.map((c) => (
-                  <td key={c.label} className="text-right tabular-nums text-zinc-500">{fmtUSD0(otherSpend(c))}</td>
+                  <td key={c.label} className="text-right tabular-nums text-zinc-500">{fmtUSD0(other(c, "spend"))}</td>
                 ))}
               </tr>
             )}
-            <TotalRow label="Total spending" cols={cols} get={(c) => c.spend} cls="text-red-400" />
-            {hasInvested && <TotalRow label="Invested (transfers in)" cols={cols} get={(c) => c.invested} />}
+            <TotalRow label="Total spending" cols={cols} get={totalSpend} cls="text-red-400" />
             {/* toned by sign: a net below zero is no saving, so it is never green */}
-            <TotalRow label="Net savings" cols={cols} get={(c) => c.net} cls={(v) => (v < 0 ? "text-red-400" : "text-emerald-400")} bold />
+            <TotalRow label="Net savings" cols={cols} get={(c) => totalIncome(c) - totalSpend(c)}
+              cls={(v) => (v < 0 ? "text-red-400" : "text-emerald-400")} bold />
+            {/* not a third term of the sum: the part of the net savings that moved into investment accounts */}
+            {hasInvested && (
+              <tr className="border-b border-zinc-800/40">
+                <td className="py-1 pl-4 text-zinc-500">moved to investment accounts</td>
+                {cols.map((c) => (
+                  <td key={c.label} className="text-right tabular-nums text-zinc-500">{fmtUSD0(c.invested)}</td>
+                ))}
+              </tr>
+            )}
             <tr data-testid="pnl-savings-rate">
               <td className="py-1.5 font-semibold">Savings rate</td>
               {cols.map((c) => (
@@ -212,7 +237,7 @@ function IncomeStatementPage() {
 
 /** a total row; `cls` is a class for every cell, or a function of each cell's value (a tone by sign) */
 function TotalRow({ label, cols, get, cls = "", bold }: {
-  label: string; cols: any[]; get: (c: any) => number; cls?: string | ((v: number) => string); bold?: boolean;
+  label: string; cols: PnL[]; get: (c: PnL) => number; cls?: string | ((v: number) => string); bold?: boolean;
 }) {
   return (
     <tr className="border-b border-zinc-700">

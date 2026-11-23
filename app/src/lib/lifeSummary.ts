@@ -26,12 +26,16 @@ export interface NetWorthDelta {
   current: Snapshot;
   prior: Snapshot;
   delta: number;
-  /** the change over the prior total; null when that total is 0 (nothing to divide by) */
+  /** the change over the prior total (changeShare); null when that total is not above 0 */
   pct: number | null;
   /** true when the prior snapshot doesn't subtract the mortgage but the
    *  current one does — the delta then understates real growth */
   mortgageCaveat: boolean;
 }
+
+/** The share a change is of the total it is measured from; null when that total is not above 0: nothing to divide by
+ *  at 0, and a share of a negative total reads backwards (−$50,000 to −$25,000 is a gain, never "−50%"). */
+export const changeShare = (delta: number, base: number): number | null => (base > 0 ? delta / base : null);
 
 /** The newest snapshot against the one nearest `monthsBack` months before it. null with fewer than two snapshots:
  *  nothing to compare, never a change of 0. */
@@ -46,7 +50,7 @@ export function netWorthDelta(snaps: Snapshot[], monthsBack = 12): NetWorthDelta
   return {
     current, prior,
     delta: current.total - prior.total,
-    pct: prior.total ? (current.total - prior.total) / prior.total : null,
+    pct: changeShare(current.total - prior.total, prior.total),
     mortgageCaveat: current.mortgage_included && !prior.mortgage_included,
   };
 }
@@ -756,45 +760,45 @@ export interface SankeyData {
 
 /** money-flow graph: income streams -> household -> categories + saved/invested. The `topCats` largest categories and
  *  the `topStreams` largest income streams are nodes of their own; the rest of each side is one "Other spending" /
- *  "Other income" node, so neither column outgrows the chart's labels. */
+ *  "Other income" node, so neither column outgrows the chart's labels.
+ *  A node's name is its identity in ECharts, so every name is unique: the household and the graph's own words keep
+ *  theirs, a category that shares one is suffixed " (spending)", and an income stream that shares any is suffixed
+ *  " (income)". One shared name would join two columns into a cycle, which ECharts' sankey refuses by throwing. */
 export function sankeyFlows(p: PnL, topCats = 10, topStreams = 10): SankeyData {
   const HUB = "Household";
-  const nodes = new Set<string>([HUB]);
-  const links: SankeyData["links"] = [];
+  /** a flow into the household (`into`) or out of it; `own` for the graph's own words, else a taxonomy name */
+  type Flow = { name: string; value: number; into: boolean; own: boolean };
+  const flows: Flow[] = [];
   const streams = p.incomeBySub.filter((s) => s.value > 0);
-  for (const s of streams.slice(0, topStreams)) {
-    nodes.add(s.name);
-    links.push({ source: s.name, target: HUB, value: Math.round(s.value) });
-  }
+  for (const s of streams.slice(0, topStreams)) flows.push({ name: s.name, value: s.value, into: true, own: false });
   const otherIncome = streams.slice(topStreams).reduce((sum, s) => sum + s.value, 0);
-  if (otherIncome >= 1) {
-    nodes.add("Other income");
-    links.push({ source: "Other income", target: HUB, value: Math.round(otherIncome) });
-  }
+  if (otherIncome >= 1) flows.push({ name: "Other income", value: otherIncome, into: true, own: true });
   const cats = p.spendByCat.filter((c) => c.value > 0);
   const head = cats.slice(0, topCats);
   // remainder vs total spend (tail categories + anything uncategorized),
   // so hub inflow equals outflow by construction
   const rest = p.spend - head.reduce((s, c) => s + c.value, 0);
-  for (const c of head) {
-    nodes.add(c.name);
-    links.push({ source: HUB, target: c.name, value: Math.round(c.value) });
-  }
-  if (rest >= 1) {
-    nodes.add("Other spending");
-    links.push({ source: HUB, target: "Other spending", value: Math.round(rest) });
-  }
-  if (p.invested > 0) {
-    nodes.add("Invested");
-    links.push({ source: HUB, target: "Invested", value: Math.round(p.invested) });
-  }
+  for (const c of head) flows.push({ name: c.name, value: c.value, into: false, own: false });
+  if (rest >= 1) flows.push({ name: "Other spending", value: rest, into: false, own: true });
+  if (p.invested > 0) flows.push({ name: "Invested", value: p.invested, into: false, own: true });
   const savedCash = p.income - p.spend - Math.max(0, p.invested);
-  if (savedCash > 1) {
-    nodes.add("Saved (cash)");
-    links.push({ source: HUB, target: "Saved (cash)", value: Math.round(savedCash) });
-  } else if (savedCash < -1) {
-    nodes.add("Drawn from savings");
-    links.push({ source: "Drawn from savings", target: HUB, value: Math.round(-savedCash) });
+  if (savedCash > 1) flows.push({ name: "Saved (cash)", value: savedCash, into: false, own: true });
+  else if (savedCash < -1) flows.push({ name: "Drawn from savings", value: -savedCash, into: true, own: true });
+
+  // the household and the graph's own words first, then the categories, then the streams: a later name that is taken
+  // takes its side's suffix until it is free
+  const taken = new Set<string>([HUB, ...flows.filter((f) => f.own).map((f) => f.name)]);
+  const named = new Map<Flow, string>(flows.filter((f) => f.own).map((f) => [f, f.name]));
+  for (const f of [...flows.filter((f) => !f.own && !f.into), ...flows.filter((f) => !f.own && f.into)]) {
+    let name = f.name;
+    while (taken.has(name)) name = `${name} ${f.into ? "(income)" : "(spending)"}`;
+    taken.add(name);
+    named.set(f, name);
   }
-  return { nodes: [...nodes].map((name) => ({ name })), links };
+  const nodes = [HUB, ...flows.map((f) => named.get(f)!)];
+  const links = flows.map((f) => {
+    const name = named.get(f)!;
+    return { source: f.into ? name : HUB, target: f.into ? HUB : name, value: Math.round(f.value) };
+  });
+  return { nodes: nodes.map((name) => ({ name })), links };
 }

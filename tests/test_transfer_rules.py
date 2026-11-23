@@ -321,7 +321,7 @@ def test_a_group_that_expects_a_counterpart_covers_its_members_but_the_row_s_own
     assert eng._counter_accounts(lone) == ["demo_savings_0000"]
     assert lone.match_status == "unmatched_unexpected"           # the savings data covers the date: a data gap
     assert [q.topic for q in res.open_questions] == ["unmatched-internal"]
-    assert "counterparty demo_banks" in res.open_questions[0].question
+    assert "no matching row in the accounts of the group demo_banks" in res.open_questions[0].question
     lone = tx("demo_checking_0000", "DEMO MOVE 0001", -5000)
     run(engine(d, windows={"demo_checking_0000": ("2030-01-01", "2030-12-31")}), [lone])
     assert lone.match_status == "unmatched_window"               # no member's data covers it: silent

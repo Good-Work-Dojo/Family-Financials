@@ -1186,6 +1186,30 @@ class Config:
         """All files in source_dir matching the glob, excluding skip patterns."""
         return [p for p in sorted(self.source_dir.glob(glob)) if not self._skipped(p)]
 
+    def statement_file_readers(self) -> dict[Path, list[str]]:
+        """Each statement file an account's patterns match, with the accounts that read it in accounts.yaml order, the
+        first the one it is read for. A file one account's patterns match is that account's, unread here. A file
+        several accounts' patterns match is read with each one's format (its first source whose pattern matches it):
+        the accounts whose format reads it, or the first of them all when none does (its ingest then fails that
+        account's import check for the file). Every other account whose pattern matches it leaves it out:
+        Pipeline.parse_transactions fails one check for each that reads it too, and `validate` prints a note."""
+        if self.source_dir is None:
+            return {}
+        matched: dict[Path, dict[str, str]] = {}       # file -> {account: the format its first matching source names}
+        for account_id in self.accounts:
+            for source in self.txn_sources(account_id):
+                for path in self.find_sources(source.glob):
+                    matched.setdefault(path, {}).setdefault(account_id, source.format)
+        from .pipeline import format_parse, read_statement
+        readers: dict[Path, list[str]] = {}
+        for path, formats in matched.items():
+            accounts = list(formats)
+            if len(accounts) > 1:
+                accounts = [a for a, fmt in formats.items()
+                            if read_statement(format_parse(fmt, self.presets), path, a)[0] is not None] or accounts[:1]
+            readers[path] = accounts
+        return readers
+
     def _skipped(self, path: Path) -> bool:
         """Whether an accounts.yaml `skip_files` pattern names the file: it is never read."""
         return any(path.match(s) for s in self.accounts_cfg.get("skip_files") or [])

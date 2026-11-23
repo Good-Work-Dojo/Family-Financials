@@ -371,8 +371,9 @@ that hang off one (money movement, margin interest, passive income) are built un
 its shipped and its renamed spelling (the ETL still emits some shipped names itself). A rename that MERGES onto a
 name already in `SHIPPED_TAXONOMY` adds nothing — the target keeps its own class; a rename onto a new name inherits the class.
 `SHIPPED_TAXONOMY` is the starter taxonomy (`starter/category_rules.yaml`, pinned by `tests/test_starter.py`), never a
-household's own (a category the owner adds in YAML needs no code change); `VOCABULARY_NAMES` lists every name the
-class lists use, and a test checks each is in it — a new class list is added there too. `categories.test.ts` fails on a shipped category name quoted anywhere else in non-test source (a short
+household's own (a category the owner adds in YAML needs no code change); `categories.test.ts` reads every name the
+class lists use through the shipped vocabulary (a listed name from its labels, a class only asked about by counting
+the taxonomy's names it matches) and checks each is in it — a new class list gets its own check there too. `categories.test.ts` fails on a shipped category name quoted anywhere else in non-test source (a short
 allowlist covers on-screen labels) and on a fixed year-month in any non-test code line. `NO_CATEGORY` lives there as well. A `lib/` function that judges
 categories takes the vocabulary as an argument (`budgetRows`, `emergencySpendRows`), so it stays pure.
 

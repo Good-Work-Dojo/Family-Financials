@@ -24,7 +24,9 @@ where they say nothing, the behaviour is this fake's own choice, marked so:
   An account marked failing is answered with its balance, no rows and an act.failed entry. `hold(seconds, requests)`
   holds that many of the next /accounts requests that long (or until the server stops) before answering each: a stall
   past the client's timeout. `redirect(location, status)` answers every later request, the claim's too, with that 30x
-  status and a Location header and nothing else (a test's choice: the protocol states no redirect).
+  status and a Location header and nothing else (a test's choice: the protocol states no redirect). `answer(status,
+  body, requests)` answers that many of the next /accounts requests with that status and body as they are (a rate
+  limit, an answer with no account or one not laid out as the protocol's: a test's choice).
 
 Every request is recorded in `received` (method, path, query and the basic-auth user, never the password), and every
 /accounts body sent in `sent`. All data is invented: placeholder ids, example.invalid hosts."""
@@ -68,7 +70,7 @@ class Account:
 
 class FakeBridge:
     """The bridge's state, which a test sets and reads: `accounts`, `errlist` (connection errors every answer carries,
-    as {code, msg, conn_id}), `hold`, `redirect`, `lapse(user)` and `revoke(user)`."""
+    as {code, msg, conn_id}), `hold`, `answer`, `redirect`, `lapse(user)` and `revoke(user)`."""
 
     def __init__(self, port: int):
         self.origin = f"http://127.0.0.1:{port}"
@@ -82,6 +84,7 @@ class FakeBridge:
         self._credentials: dict[str, str] = {}      # user -> password
         self._lapsed: set[str] = set()
         self._redirect: tuple[int, str] | None = None   # (status, location) every request is answered with
+        self._canned: list[tuple[int, bytes]] = []      # (status, body) the next /accounts requests are answered with
         self._lock = threading.Lock()
         self._stopping = threading.Event()
 
@@ -103,6 +106,12 @@ class FakeBridge:
         """Hold the next `requests` /accounts requests `seconds` each before answering"""
         with self._lock:
             self._stall, self._stalls = seconds, requests
+
+    def answer(self, status: int, body: bytes, requests: int = 1) -> None:
+        """Answer the next `requests` /accounts requests (after the credential check) with `status` and `body` as they
+        are, in place of the accounts"""
+        with self._lock:
+            self._canned = [(status, body)] * requests
 
     def redirect(self, location: str, status: int = 302) -> None:
         """Answer every later request with `status` and a Location header naming `location`"""
@@ -177,6 +186,11 @@ class FakeBridge:
             self._stalls -= held
         if held:
             self._stopping.wait(self._stall)
+        with self._lock:
+            canned = self._canned.pop(0) if self._canned else None
+        if canned is not None:
+            _send(h, canned[0], canned[1], "application/json")
+            return
         body = json.dumps(self._answer(query)).encode()
         with self._lock:
             self.sent.append(body)

@@ -45,6 +45,7 @@ from .models import (
     DEFAULT_CLASS_BY_KIND,
     INCOME_CATEGORY,
     INTERNAL_CATEGORY,
+    INTERNAL_TYPES,
     LIABILITY_CLASSES,
     LIABILITY_KINDS,
     MODULE_IDS,
@@ -1064,6 +1065,39 @@ def ai_notes(doc: Mapping) -> list[str]:
             "no vendor holding it is sent"]
 
 
+# the most file names a shared_file_notes line names (it counts them all)
+_FILES_NAMED = 5
+
+
+def shared_file_notes(cfg) -> list[str]:
+    """What `validate` says without refusing accounts.yaml when a statement file matches the patterns of two accounts
+    whose formats both read it: one line per later account and earlier account, counting such files by their path in
+    the statements folder (the first few named) and naming the account listed before it that reads them
+    (Config.statement_file_readers); the ingest fails a check for that later account. A file a later account's format
+    refuses is no note: it is simply the other account's."""
+    readers = cfg.statement_file_readers()
+    by_account: dict[str, dict[str, list[str]]] = {}
+    for account_id in cfg.accounts:
+        for source in cfg.txn_sources(account_id):
+            for path in cfg.find_sources(source.glob):
+                who = readers.get(path, [account_id])
+                reader = who[0]
+                name = path.relative_to(cfg.source_dir).as_posix() if path.is_relative_to(cfg.source_dir) else path.name
+                if reader != account_id and account_id in who:
+                    names = by_account.setdefault(account_id, {}).setdefault(reader, [])
+                    if name not in names:
+                        names.append(name)
+    out = []
+    for account_id, by_reader in by_account.items():
+        for reader, names in by_reader.items():
+            n, shown = len(names), ", ".join(sorted(names)[:_FILES_NAMED])
+            more = f", and {n - _FILES_NAMED} more" if n > _FILES_NAMED else ""
+            out.append(f"{_ACCOUNTS}: accounts.{account_id}: {n} statement file{'s' if n != 1 else ''} its pattern "
+                       f"matches {'are' if n != 1 else 'is'} read for {reader}, the account listed before it: "
+                       f"{shown}{more} — give each account a file pattern that matches only its own files")
+    return out
+
+
 def household_problems(doc: Mapping) -> list[Problem]:
     """household.yaml beyond the shape of its values (Config's own checks): unknown keys at the top, in a member and
     in `net_worth`; every `modules` key a known module (MODULE_IDS) and its value true or false; the scheduled refresh's
@@ -1792,6 +1826,13 @@ def _set_problems(where: str, set_, *, taxonomy: Mapping | None, roster: Roster 
     if taxonomy is not None and is_text(set_.get("category")):
         category, sub = rename(set_["category"], set_.get("subcategory"))
         out += taxonomy_problems(file, f"{where}.set", category, sub, taxonomy)
+    kind = set_.get("type")
+    if (is_text(set_.get("category")) and rename(set_["category"], set_.get("subcategory"))[0] == INTERNAL_CATEGORY
+            and not (isinstance(kind, str) and kind in INTERNAL_TYPES)):
+        # the type alone takes a row out of spending and income: filed Internal without one, it still counts
+        out.append(Problem(file, f"{where}.set.category", f"category {INTERNAL_CATEGORY!r} with no internal type "
+                           "still counts the row in spending or income",
+                           "set type: transfer (transfer_rules.yaml or an override) instead"))
     if roster is not None and set_.get("earner") is not None:
         found = earner_problem(file, f"{where}.set.earner", set_["earner"], roster)
         out += [found] if found else []

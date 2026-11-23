@@ -13,8 +13,9 @@ spread, or most charges share one amount) or `variable` (within a band around th
 frequent store, not a subscription. A series is `active` while the data end is within twice its median gap of
 `last_seen`; a vendor in `assumptions.cancelled_subscriptions` is never active.
 
-Every series also carries `median_gap_days`, `expected_dates` (its next three occurrences; `next_expected` is the
-first), `grace_days` per cadence (`GRACE_DAYS`) and `confidence` (the cadence band's share × 1.0 for fixed or 0.85 for
+Every series also carries `median_gap_days`, `expected_dates` (its next three occurrences, `EXPECTED_DATES`, and a
+monthly series its next thirteen, `MONTHLY_EXPECTED_DATES`, a date in each of the twelve months after the month in
+progress, so the dashboard reads every date of a next-12-months view from here; `next_expected` is the first), `grace_days` per cadence (`GRACE_DAYS`) and `confidence` (the cadence band's share × 1.0 for fixed or 0.85 for
 variable). `promote(record)` sets `schedule`: active, cadence set, amount mode fixed or variable, at least 4 DISTINCT
 charge dates for weekly / biweekly and 3 otherwise, and confidence ≥ 0.7. Nothing here reads the clock;
 judging a schedule against today is the app's job.
@@ -102,13 +103,13 @@ its "all renewals" list and "renewals in the next 90 days" line, and Planning's 
 The "next 12 months" chart has exactly twelve bars (`obligationMonths`): the first is the month after the month in
 progress (`monthInProgress`), never a month already under way, and a month no bill falls in is a bar at zero. Each bar
 is the active items' charges expected in that month, by `expectedCharges` (`lib/obligations.ts`, which the forecast
-reads too): each item's exported `expected_dates` (the ETL's, so a monthly bill on its own day), then later ones by its
-cadence — calendar months for monthly, quarterly and annual items, each counted from the exported date with the latest
-day of the month (so a clamped month end never becomes the day) and kept from the month after the last exported date
-on; the median gap in days for weekly and biweekly ones, as the ETL steps them (7 or 14 from an export that states
+reads too): each item's exported `expected_dates` (the ETL's, so a monthly bill on its own day, a business-day end
+included; a monthly item's thirteen cover the window), then, only for a date past them (a bill already late, a longer
+horizon), later ones by its cadence — calendar months for monthly, quarterly and annual items, each counted from the
+exported date with the latest day of the month (so a clamped month end never becomes the day) and kept from the
+month after the last exported date on; the median gap in days for weekly and biweekly ones, as the ETL steps them (7 or 14 from an export that states
 none) — and dates already past (a late or lapsed charge) are left out of the window. So a monthly bill with a
 day-of-month rule is in every bar from its next expected month on, an annual one in its month; an irregular monthly
-bill's three exported dates are day counts from its last payment and can skip or double a month before the calendar
-months take over. The chart's list of renewals and Planning's
-lumpy-bills figure total the same twelve months; the 90-day line runs from the newest snapshot's date, else the day the
+bill's exported dates are day counts from its last payment and can skip or double a month. The chart's list of
+renewals and Planning's lumpy-bills figure total the same twelve months; the 90-day line runs from the newest snapshot's date, else the day the
 data reaches (`obligationsFrom`).

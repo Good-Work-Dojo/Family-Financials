@@ -7,13 +7,16 @@ which only these tests set).
 The single-use setup token is spent once: the credential file exists, empty and 0600, before the claim is sent, and
 holds the access URL (0600) before the first account request; a claim that fails removes the empty file and says
 whether the token may still be used; a run stopped after the claim resumes at the accounts without a token. Whatever
-is on disk is kept (household.yaml and accounts.yaml are replaced only with --force), an answers file others may read
-or missing a key is refused before anything is written, and every household it writes passes the validator."""
+is on disk is kept (household.yaml and accounts.yaml are replaced only with --force, each kept as <name>.previous), an
+answers file others may read or missing a key is refused before anything is written, and every household it writes
+passes the validator. --feed connects a feed to a household set up already, adding to accounts.yaml line by line."""
 from __future__ import annotations
 
 import datetime as dt
 import errno
+import json
 import os
+import shutil
 import signal
 import stat
 import time
@@ -213,10 +216,22 @@ def test_what_is_on_disk_is_kept_and_force_asks_again(home, capsys):
     assert {n: (home / "config" / n).read_bytes() for n in before} == before
     passcodes = (home / "secrets" / "web" / "passcodes").read_text()
     assert passcodes.startswith("robin:")
-    assert _run(home, answers(), force=True) == 0
+    out: list[str] = []
+    assert _run(home, answers(), force=True, out=out.append) == 0
     assert _yaml(home / "config" / "household.yaml")["name"] == "The Samples"
     assert "# kept" not in (home / "config" / "accounts.yaml").read_text()
     assert (home / "secrets" / "web" / "passcodes").read_text() == passcodes      # a passcode is never replaced
+    # each file --force replaced is kept beside it as it was, readable by its owner alone, and the run says where
+    for name, old in before.items():
+        kept = home / "config" / f"{name}.previous"
+        assert kept.read_bytes() == old and stat.S_IMODE(os.stat(kept).st_mode) == 0o600
+        assert f"{name} as it was is kept as {kept}" in out
+    assert _cfg(home).accounts == {}                       # the copies are no config file the validator reads
+
+
+def test_force_on_a_household_with_no_files_yet_keeps_no_previous_copy(home):
+    assert _run(home, answers(), force=True) == 0
+    assert sorted(p.name for p in (home / "config").glob("*.previous")) == []
 
 
 def test_a_run_again_asks_nothing_already_answered(home):
@@ -305,6 +320,15 @@ def test_a_run_stopped_after_the_claim_resumes_at_the_accounts_without_spending_
     assert any("setup token in the answers file is not used" in line for line in out)
     assert len([r for r in bridge.received if r.method == "POST"]) == 1
     assert len(_cfg(home).accounts) == 3
+
+
+def test_a_feed_that_lists_no_account_yet_keeps_the_connection_and_says_to_connect_banks_first(home, bridge, capsys):
+    bridge.accounts = []
+    assert _run(home, answers(feed={"token": bridge.setup_token(), **FEED_ANSWERS})) == 2
+    err = capsys.readouterr().err
+    assert "lists no account yet" in err and "Traceback" not in err
+    assert (home / "secrets" / "feed" / "simplefin_access_url").read_text().startswith("http://")
+    assert not (home / "config" / "accounts.yaml").exists()
 
 
 def test_a_token_already_claimed_leaves_no_credential_and_says_a_new_one_is_needed(home, bridge, capsys):
@@ -432,6 +456,355 @@ def test_the_token_and_the_passcode_are_never_printed(home, bridge, capsys):
     url = (home / "secrets" / "feed" / "simplefin_access_url").read_text()
     for secret in (token, PASSCODE, url, urllib.parse.urlsplit(url).password):
         assert secret not in said
+
+
+# ------------------------------------------------------------------ --feed: a bank feed for a household set up already
+
+MINIMAL = install.ROOT / "examples" / "minimal"
+# a hand-written accounts.yaml, as a household keeps one: comments, an account read from statement files, a card with
+# a credit limit and a hand-entered asset
+HAND_WRITTEN = """\
+# Our accounts, kept by hand.
+version: 1
+accounts:
+  # the joint checking account, from its statement files
+  demo_checking_0000:
+    name: Sample Checking
+    institution: Sample Bank
+    owner: Alex
+    kind: checking
+    parser: chase_checking
+    glob: "demo_checking_0000-*.csv"   # one file a month
+  rewards_card:
+    name: Rewards Card
+    institution: Example Card Co
+    owner: Alex
+    kind: credit-card
+    credit_limit: 5000
+
+# what no bank reports
+manual_entries:
+  - {account: Family car, institution: Sample, owner: Joint, asset_class: Car, value: 9000, as_of: 2025-01-01}
+"""
+
+
+def _set_up(home: Path, accounts_text: str = HAND_WRITTEN) -> dict[str, bytes]:
+    """The minimal household with `accounts_text` as its accounts.yaml and its statement file, set up offline with a
+    passcode; returns the two config files' bytes."""
+    shutil.copytree(MINIMAL / "imports", home / "imports", dirs_exist_ok=True)
+    (home / "config").mkdir(exist_ok=True)
+    shutil.copy(MINIMAL / "config" / "household.yaml", home / "config" / "household.yaml")
+    (home / "config" / "accounts.yaml").write_text(accounts_text, "utf-8")
+    out: list[str] = []
+    assert _run(home, answers(), offline=True, out=out.append) == 0, "\n".join(out)
+    return {n: (home / "config" / n).read_bytes() for n in ("household.yaml", "accounts.yaml")}
+
+
+def _feed(home: Path, doc: dict | None, **kw) -> int:
+    file = write_answers(home.parent / "answers.yaml", doc) if doc is not None else None
+    return run(str(file) if file else None, feed=True, out=kw.pop("out", lambda _: None), **kw)
+
+
+def _uids(home: Path) -> dict[str, str]:
+    from etl import pipeline
+    assert pipeline.run() == 0
+    doc = json.loads((home / "data" / "exports" / "transactions.json").read_text("utf-8"))
+    return {t["id"]: t["account"] for t in doc["transactions"]}
+
+
+def _recent_statement(home: Path, *days_ago: int) -> dt.date:
+    """A statement file of demo_checking_0000 (the chase_checking layout its pattern matches) with one row on each of
+    `days_ago` days before today on the household's clock, inside the bank feed's window; returns its newest day."""
+    today = dt.datetime.now(zoneinfo.ZoneInfo("America/New_York")).date()
+    days = sorted((today - dt.timedelta(days=n) for n in days_ago), reverse=True)
+    balance = 4865_00 - 10_00 * len(days)
+    rows = []
+    for i, day in enumerate(days):
+        rows.append(f"DEBIT,{day:%m/%d/%Y},SAMPLE GROCER {i},-10.00,DEBIT_CARD,{balance / 100 + 10 * i:.2f},\n")
+    (home / "imports" / "demo_checking_0000-recent.csv").write_text(
+        "Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #\n" + "".join(rows), "utf-8")
+    return days[0]
+
+
+def test_feed_attaches_a_feed_account_to_an_existing_one_appends_the_rest_and_rewrites_no_other_line(home, bridge):
+    before = _set_up(home)
+    # the statement files reach into the bank feed's window: the cutover falls after their last day, so every row they
+    # hold keeps its place and its id
+    last_file_day = _recent_statement(home, 20, 10)
+    rows_before = _uids(home)
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CHECKING: {"account": "demo_checking_0000"},
+                                 CARD: {"kind": "credit-card", "owner": "Alex"}, LOAN: "skip"}}}
+    out: list[str] = []
+    assert _feed(home, doc, out=out.append) == 0, "\n".join(out)
+    config = home / "config"
+    assert (config / "household.yaml").read_bytes() == before["household.yaml"]
+    assert (config / "accounts.yaml.previous").read_bytes() == before["accounts.yaml"]
+    assert stat.S_IMODE(os.stat(config / "accounts.yaml.previous").st_mode) == 0o600
+    # every line of the file as it was is still there, in its order: the comments, the card, the manual entry
+    text = (config / "accounts.yaml").read_text("utf-8")
+    old_lines = before["accounts.yaml"].decode().splitlines()
+    new_lines = text.splitlines()
+    it = iter(new_lines)
+    assert all(line in it for line in old_lines)
+    assert len(new_lines) > len(old_lines)
+    old, new = yaml.safe_load(before["accounts.yaml"]), _yaml(config / "accounts.yaml")
+    assert new["manual_entries"] == old["manual_entries"]
+    assert new["accounts"]["rewards_card"] == old["accounts"]["rewards_card"]
+    checking = new["accounts"]["demo_checking_0000"]
+    earliest = min(t["posted"] for t in bridge.accounts[0].transactions)
+    assert dt.datetime.fromtimestamp(earliest, zoneinfo.ZoneInfo("America/New_York")).date() < last_file_day
+    assert checking == {**old["accounts"]["demo_checking_0000"], "simplefin_id": CHECKING,
+                        "simplefin_cutover": (last_file_day + dt.timedelta(days=1)).isoformat()}
+    assert any(f"own the days before {checking['simplefin_cutover']}" in line for line in out)
+    added = [m for aid, m in new["accounts"].items() if aid not in old["accounts"]]
+    assert added == [{"name": "Sample Visa Card 1111", "institution": "Sample Bank", "owner": "Alex",
+                      "kind": "credit-card", "simplefin_id": CARD}]
+    assert len([r for r in bridge.received if r.method == "POST"]) == 1
+    assert _cfg(home).simplefin_map() == {CHECKING: "demo_checking_0000", CARD: "sample_visa_card_1111"}
+    # every row of the statement files is still there, under its id and its account
+    rows_after = _uids(home)
+    assert rows_before.keys() <= rows_after.keys()
+    assert {uid: account for uid, account in rows_after.items() if uid in rows_before} == rows_before
+
+
+def test_feed_takes_the_cutover_from_the_feeds_first_day_when_the_statement_files_end_before_it(home, bridge):
+    """Statement files that end before the bank feed's window: the feed owns the days from the day after its earliest
+    transaction, as init sets it."""
+    _set_up(home)
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CHECKING: {"account": "demo_checking_0000"}, CARD: "skip", LOAN: "skip"}}}
+    assert _feed(home, doc) == 0
+    earliest = min(t["posted"] for t in bridge.accounts[0].transactions)
+    day = dt.datetime.fromtimestamp(earliest, zoneinfo.ZoneInfo("America/New_York")).date()
+    assert _cfg(home).accounts["demo_checking_0000"]["simplefin_cutover"] == (day + dt.timedelta(days=1)).isoformat()
+
+
+def test_feed_reads_the_last_statement_day_from_the_last_export_when_the_config_cannot_be_loaded(home, bridge):
+    """With a config the ETL refuses (here a rule file's problem), the account's last statement-file day is the data
+    end the last export states for it; init still says the config has problems."""
+    _set_up(home)
+    last_file_day = _recent_statement(home, 30, 15)
+    _uids(home)
+    (home / "imports" / "demo_checking_0000-recent.csv").unlink()      # only the export still knows that day
+    (home / "config" / "assumptions.yaml").write_text("coverage: {min_share: 7}\n", "utf-8")
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CHECKING: {"account": "demo_checking_0000"}, CARD: "skip", LOAN: "skip"}}}
+    out: list[str] = []
+    assert _feed(home, doc, out=out.append) == 1
+    written = _yaml(home / "config" / "accounts.yaml")["accounts"]["demo_checking_0000"]
+    assert written["simplefin_cutover"] == (last_file_day + dt.timedelta(days=1)).isoformat()
+
+
+SOURCES = HAND_WRITTEN.replace(
+    '    parser: chase_checking\n    glob: "demo_checking_0000-*.csv"   # one file a month\n',
+    '    sources:\n      - {format: chase_checking, glob: "demo_checking_0000-*.csv"}\n'
+    '      - {format: chase_checking, glob: "demo_checking_0000_new-*.csv", since: 2099-01-01}\n')
+
+
+def test_feed_refuses_a_cutover_that_would_leave_a_later_source_no_day_and_writes_nothing(home, bridge, capsys):
+    """An account whose later source starts after the day the bank feed would take over: the config would be refused,
+    so nothing is written and the line says what to change."""
+    assert SOURCES != HAND_WRITTEN
+    before = _set_up(home, SOURCES)
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CHECKING: {"account": "demo_checking_0000"}, CARD: "skip", LOAN: "skip"}}}
+    assert _feed(home, doc) == 2
+    err = capsys.readouterr().err
+    assert "starts on 2099-01-01" in err and "the bank feed stays connected" in err and "Traceback" not in err
+    assert (home / "config" / "accounts.yaml").read_bytes() == before["accounts.yaml"]
+    assert not (home / "config" / "accounts.yaml.previous").exists()
+
+
+def test_feed_on_a_terminal_offers_the_accounts_no_feed_reads_yet(home, bridge):
+    _set_up(home)
+    typed = iter(["1",                     # the feed's checking account is Sample Checking
+                  "2", "3", "1",           # the card: a new account, a credit card, Alex's
+                  "3"])                    # the loan: skipped (Rewards Card is the only one left to offer)
+    out: list[str] = []
+    rc = run(None, feed=True, out=out.append, ask=lambda q: next(typed), secret=lambda q: bridge.setup_token())
+    assert rc == 0, "\n".join(out)
+    assert next(typed, None) is None
+    accounts = _cfg(home).accounts
+    assert accounts["demo_checking_0000"]["simplefin_id"] == CHECKING
+    assert accounts["sample_visa_card_1111"]["kind"] == "credit-card"
+    assert "simplefin_id" not in accounts["rewards_card"]
+    assert out[-1].startswith("Done.") and "./ff refresh" in out[-1]
+
+
+def test_feed_with_every_feed_account_in_place_changes_nothing(home, bridge):
+    _set_up(home)
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CHECKING: {"account": "demo_checking_0000"}, CARD: {"account": "rewards_card"},
+                                 LOAN: {"kind": "loan", "owner": "Joint", "mortgage": True}}}}
+    assert _feed(home, doc) == 0
+    written = (home / "config" / "accounts.yaml").read_bytes()
+    (home / "config" / "accounts.yaml.previous").unlink()
+    out: list[str] = []
+    assert _feed(home, {"feed": {}}, out=out.append) == 0
+    assert (home / "config" / "accounts.yaml").read_bytes() == written
+    assert not (home / "config" / "accounts.yaml.previous").exists()
+    assert any("every account the bank feed lists is in accounts.yaml already" in line for line in out)
+    assert _cfg(home).accounts["sample_home_mortgage_2222"]["mortgage"] is True
+
+
+@pytest.mark.parametrize("entry, said", [({"account": "nowhere"}, "is not an account of yours that the bank feed "
+                                                                  "does not read yet"),
+                                         (None, "says nothing about the bank feed account")])
+def test_feed_refuses_an_answer_it_cannot_follow_and_writes_nothing(home, bridge, entry, said, capsys):
+    before = _set_up(home)
+    accounts = {CHECKING: {"account": "demo_checking_0000"}, CARD: "skip", LOAN: entry}
+    if entry is None:
+        del accounts[LOAN]
+    assert _feed(home, {"feed": {"token": bridge.setup_token(), "accounts": accounts}}) == 2
+    assert said in capsys.readouterr().err
+    assert (home / "config" / "accounts.yaml").read_bytes() == before["accounts.yaml"]
+    assert not (home / "config" / "accounts.yaml.previous").exists()
+
+
+def test_feed_attaches_no_two_feed_accounts_to_one_account(home, bridge, capsys):
+    _set_up(home)
+    doc = {"feed": {"token": bridge.setup_token(), "accounts": {CHECKING: {"account": "rewards_card"},
+                                                                CARD: {"account": "rewards_card"}, LOAN: "skip"}}}
+    assert _feed(home, doc) == 2
+    assert "rewards_card is not an account of yours that the bank feed does not read yet" in capsys.readouterr().err
+
+
+# the card as a household keeps it after the bank re-linked it: accounts.yaml names the id the feed gave it before,
+# which the feed no longer lists
+RELINKED = HAND_WRITTEN.replace("    credit_limit: 5000\n",
+                                "    credit_limit: 5000\n    simplefin_id: \"ACT-old-0009\"   # before the re-link\n")
+OLD_ID = "ACT-old-0009"
+
+
+def _old_snapshot(home: Path) -> None:
+    """A snapshot the feed stored before the re-link: the card under its old id, with a balance."""
+    snaps = home / "store" / "simplefin" / "snapshots"
+    snaps.mkdir(parents=True, exist_ok=True)
+    taken = int(time.time()) - 60 * DAY
+    doc = {"errors": [], "accounts": [{"id": OLD_ID, "name": "Sample Visa Card 1111", "currency": "USD",
+                                       "balance": "-120.00", "available-balance": "-120.00", "balance-date": taken,
+                                       "org": {"name": "Sample Bank"}, "transactions": []}]}
+    stamp = dt.datetime.fromtimestamp(taken, dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    (snaps / f"accounts-{stamp}.json").write_text(json.dumps(doc), "utf-8")
+
+
+def test_feed_attaches_a_feed_account_to_one_whose_feed_id_the_feed_no_longer_lists(home, bridge):
+    """A re-linked card: its new feed id is attached to the account that names the old one, which moves to
+    simplefin_id_history; no second account is added, every other line is as it was, and net worth counts the card
+    once."""
+    assert RELINKED != HAND_WRITTEN
+    before = _set_up(home, RELINKED)
+    _old_snapshot(home)
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CARD: {"account": "rewards_card"}, CHECKING: "skip", LOAN: "skip"}}}
+    out: list[str] = []
+    assert _feed(home, doc, out=out.append) == 0, "\n".join(out)
+    assert not any("written again whole" in line for line in out)
+    old, new = yaml.safe_load(before["accounts.yaml"]), _yaml(home / "config" / "accounts.yaml")
+    assert new["accounts"]["rewards_card"] == {**old["accounts"]["rewards_card"], "simplefin_id": CARD,
+                                               "simplefin_id_history": [OLD_ID]}
+    assert new["accounts"].keys() == old["accounts"].keys()
+    text = (home / "config" / "accounts.yaml").read_text("utf-8")
+    assert text.count("simplefin_id:") == 1
+    kept = [line for line in before["accounts.yaml"].decode().splitlines() if OLD_ID not in line]
+    it = iter(text.splitlines())
+    assert all(line in it for line in kept)
+    assert _cfg(home).simplefin_map() == {CARD: "rewards_card", OLD_ID: "rewards_card"}
+    _uids(home)
+    exports = home / "data" / "exports"
+    last = json.loads((exports / "assets_timeseries.json").read_text("utf-8"))["snapshots"][-1]
+    assert [r["value"] for r in last["rows"] if r["account_id"] == "rewards_card"] == [-310.0]
+    assert len({r["account_id"] for r in last["rows"]}) == len(last["rows"])
+    names = [a["name"] for a in json.loads((exports / "accounts.json").read_text("utf-8"))["accounts"]]
+    assert "Sample Visa Card 1111" not in names and names.count("Rewards Card") == 1
+
+
+def test_feed_on_a_terminal_offers_a_relinked_account_and_has_no_default_answer_then(home, bridge):
+    """On a terminal the re-linked card is offered with the accounts no feed id names, and while it is offered an
+    Enter alone is no answer: the question is asked again."""
+    _set_up(home, RELINKED)
+    typed = iter(["",                      # the feed's checking account: Enter alone is not "a new account"
+                  "1",                     # it is Sample Checking
+                  "1",                     # the card is the re-linked Rewards Card
+                  "6"])                    # the loan: skipped (no account is left to offer)
+    out: list[str] = []
+    rc = run(None, feed=True, out=out.append, ask=lambda q: next(typed), secret=lambda q: bridge.setup_token())
+    assert rc == 0, "\n".join(out)
+    assert next(typed, None) is None
+    assert any("Rewards Card (rewards_card)" in line and "another id" in line for line in out)
+    assert not any("a new account (Enter)" in line for line in out)
+    accounts = _cfg(home).accounts
+    assert accounts["demo_checking_0000"]["simplefin_id"] == CHECKING
+    assert (accounts["rewards_card"]["simplefin_id"], accounts["rewards_card"]["simplefin_id_history"]) == (CARD,
+                                                                                                           [OLD_ID])
+    assert len(accounts) == 2
+
+
+def test_feed_needs_a_household_and_is_not_given_with_force(home, bridge, capsys):
+    assert _feed(home, {"feed": {"token": bridge.setup_token()}}) == 2
+    assert "there is no household to connect a bank feed to yet: run ./ff init first" in capsys.readouterr().err
+    _set_up(home)
+    assert _feed(home, {"feed": {}}, force=True) == 2
+    assert "give one of them" in capsys.readouterr().err
+    assert bridge.received == []
+
+
+def test_feed_rewrites_a_file_it_cannot_add_to_line_by_line_whole_keeping_it_as_previous(home, bridge):
+    flow = ("version: 1\naccounts:\n  demo_checking_0000: {name: Sample Checking, institution: Sample Bank, "
+            "owner: Alex, kind: checking, parser: chase_checking, glob: \"demo_checking_0000-*.csv\"}\n")
+    before = _set_up(home, flow)
+    doc = {"feed": {"token": bridge.setup_token(),
+                    "accounts": {CHECKING: {"account": "demo_checking_0000"}, CARD: "skip", LOAN: "skip"}}}
+    out: list[str] = []
+    assert _feed(home, doc, out=out.append) == 0
+    assert (home / "config" / "accounts.yaml.previous").read_bytes() == before["accounts.yaml"]
+    assert any("written again whole" in line for line in out)
+    checking = _cfg(home).accounts["demo_checking_0000"]
+    assert checking["simplefin_id"] == CHECKING and checking["parser"] == "chase_checking"
+    assert "simplefin_cutover" in checking
+
+
+@pytest.mark.parametrize("text, attach, append", [
+    ("version: 1\naccounts: {}\n", {}, {"new": {"name": "New", "kind": "checking"}}),
+    ("version: 1\naccounts:   # ours\n", {}, {"new": {"name": "New"}}),
+    ("accounts:\n  'a b':\n      name: A\n      sources:\n        - {parser: x, glob: y}\nother: 1\n",
+     {"a b": {"simplefin_id": "ACT-1"}}, {"c": {"name": "C"}}),
+    ("accounts:\n  a:\n    name: A\n    note: |\n      two\n      lines\n\n# after\nb: 2\n",
+     {"a": {"simplefin_id": "ACT-1", "simplefin_cutover": "2026-01-02"}}, {}),
+])
+def test_the_line_by_line_merge_gives_the_file_the_whole_rewrite_would(text, attach, append):
+    merged = setup_cli.merged_accounts_text(text, attach, append)
+    expected = yaml.safe_load(text)
+    expected["accounts"] = expected.get("accounts") or {}
+    for aid, add in attach.items():
+        expected["accounts"][aid].update(add)
+    expected["accounts"].update(append)
+    assert merged is not None and yaml.safe_load(merged) == expected
+    assert all(line in merged.splitlines() for line in text.splitlines() if "accounts:" not in line)
+
+
+@pytest.mark.parametrize("text", ["accounts: {a: {name: A}}\n", "accounts:\n  a: {name: A}\n",
+                                  "accounts:\n  b:\n    name: B\n", "accounts:\n\taa:\n"])
+def test_the_line_by_line_merge_gives_up_on_a_shape_it_does_not_add_to(text):
+    assert setup_cli.merged_accounts_text(text, {"a": {"simplefin_id": "ACT-1"}}, {}) is None
+
+
+@pytest.mark.parametrize("history", ["    simplefin_id_history:\n    - ACT-0\n",
+                                     "    simplefin_id_history:\n      - ACT-0   # the first\n",
+                                     "    simplefin_id_history: [ACT-0]\n"])
+def test_the_line_by_line_merge_replaces_the_keys_an_entry_has_in_place(history):
+    """A key the entry has already (the feed id of a re-linked account, its earlier ids) is written where it stands,
+    once; every other line is as it was."""
+    text = f"accounts:\n  a:\n    name: A\n    simplefin_id: ACT-1  # the old one\n{history}    note: kept\n# end\n"
+    add = {"simplefin_id": "ACT-2", "simplefin_id_history": ["ACT-0", "ACT-1"]}
+    merged = setup_cli.merged_accounts_text(text, {"a": add}, {})
+    assert merged is not None
+    assert yaml.safe_load(merged) == {"accounts": {"a": {"name": "A", "simplefin_id": "ACT-2",
+                                                         "simplefin_id_history": ["ACT-0", "ACT-1"], "note": "kept"}}}
+    assert merged.count("simplefin_id:") == 1 and merged.count("simplefin_id_history:") == 1
+    assert merged.splitlines()[:3] == ["accounts:", "  a:", "    name: A"]
+    assert merged.splitlines()[-2:] == ["    note: kept", "# end"]
 
 
 # ------------------------------------------------------------------ on a terminal

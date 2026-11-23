@@ -53,9 +53,9 @@ export const CLASS_COLORS: Record<string, string> = {
 /** asset classes plotted as negative (debt) bands */
 export const DEBT_CLASSES = new Set(["Mortgage", "Margin", "Other Debt"]);
 
-/** The asset classes as the dashboard orders them (CLASS_COLORS as written, then DEBT_CLASSES): what an export older
- *  than assumptions.json `asset_classes` reads as. Written out, since Object.keys would put "529" first. The export
- *  lists the same classes (tests/test_exports.py) and so does CLASS_COLORS (loadAppData.test.ts). */
+/** The asset classes as the dashboard orders them (CLASS_COLORS as written, then DEBT_CLASSES): the order the
+ *  manual-assets editor lists a household's classes in. Written out, since Object.keys would put "529" first. The export
+ *  lists the same classes (tests/test_exports.py) and so does CLASS_COLORS (tokens.test.ts). */
 export const SHIPPED_ASSET_CLASSES: AssetClasses = {
   assets: ["Cash", "Stocks/ETF", "Retirement", "Crypto", "Precious Metals", "Real Estate/Venture", "House", "Car", "529",
     "Private Stock"],
@@ -69,6 +69,10 @@ export const HOUSE_CLASS = "House";
 /** the asset class of a retirement account (accounts.yaml `asset_class: Retirement`, or the default of its kind): the
  *  accounts Planning's retirement projection can map to a person */
 export const RETIREMENT_CLASS = "Retirement";
+
+/** the asset class of a college savings account (accounts.yaml `asset_class: 529`): illiquid like Retirement, and a
+ *  draw from it is penalised like one */
+export const COLLEGE_CLASS = "529";
 
 export const CATEGORY_PALETTE = [
   "#3b82f6", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#14b8a6", "#f97316",

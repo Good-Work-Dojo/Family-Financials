@@ -59,6 +59,35 @@ def test_an_empty_directory_becomes_the_demo_household_ready_to_start(home, caps
         assert stat.S_IMODE(os.stat(home / d.path).st_mode) == d.mode, d.path
 
 
+def test_the_demos_planted_warnings_are_its_two_bank_feed_ones_and_it_says_so(home):
+    out = []
+    assert demo_cli.run(out=out.append, now=NOW) == 0
+    report = json.loads((home / "data" / "exports" / "quality_report.json").read_text())
+    warned = sorted(c["name"].rsplit(".", 1)[0] for c in report["checks"] if c["status"] == "warn")
+    assert warned == ["simplefin.stale", "simplefin.unmapped"]
+    assert demo_cli.PLANTED_WARNINGS in out
+    assert out.index(demo_cli.PLANTED_WARNINGS) < next(i for i, line in enumerate(out) if line.startswith("Sign in"))
+    readme = " ".join((install.ROOT / "README.md").read_text("utf-8").split()).lower()
+    assert "the two warnings its ingest prints are part of the demo" in readme
+
+
+def test_doctor_on_the_demo_says_its_feed_is_invented_instead_of_warning_of_no_stored_access(home):
+    """The demo's accounts name bank feed ids with no access stored, by design: doctor says what they are and warns of
+    nothing there; the same accounts under another household's name are warned of."""
+    from etl import doctor_cli
+    assert demo_cli.run(out=lambda _: None, now=NOW) == 0
+    lines: list[str] = []
+    doctor_cli.run(out=lines.append, now=NOW)
+    assert not any("no bank feed access is stored" in line for line in lines)
+    assert "ok    the demo household's bank feed is invented: its accounts show the snapshots it came with" in lines
+    household = home / "config" / "household.yaml"
+    household.write_text(household.read_text("utf-8").replace("The Sample household", "The Example household"),
+                         "utf-8")
+    lines.clear()
+    doctor_cli.run(out=lines.append, now=NOW)
+    assert any(line.startswith("warn  ") and "no bank feed access is stored" in line for line in lines)
+
+
 def test_the_demo_made_under_umask_000_is_written_with_the_tables_modes(tmp_path):
     home = tmp_path / "home"
     home.mkdir()

@@ -80,13 +80,15 @@ export function AsOfBadge({ date, assumed, generatedAt }: {
   );
 }
 
-export function SegmentToggle<T extends string>({ options, value, onChange }: {
-  options: { value: T; label: string }[]; value: T; onChange: (v: T) => void;
+/** A row of buttons picking one option: a group named by `label` (what the options choose between, for a screen reader),
+ *  the selected button pressed (`aria-pressed`) */
+export function SegmentToggle<T extends string>({ label, options, value, onChange }: {
+  label: string; options: { value: T; label: string }[]; value: T; onChange: (v: T) => void;
 }) {
   return (
-    <div className="inline-flex rounded-lg border border-zinc-700 p-0.5 text-xs">
+    <div role="group" aria-label={label} className="inline-flex rounded-lg border border-zinc-700 p-0.5 text-xs">
       {options.map((o) => (
-        <button key={o.value} onClick={() => onChange(o.value)}
+        <button key={o.value} type="button" aria-pressed={value === o.value} onClick={() => onChange(o.value)}
           className={`min-h-11 rounded-md px-2.5 py-1 md:min-h-0 ${value === o.value
             ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"}`}>
           {o.label}

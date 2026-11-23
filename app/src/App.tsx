@@ -10,6 +10,7 @@ import PageMoved from "./components/PageMoved";
 import HouseholdName from "./components/HouseholdName";
 import HubShell from "./components/HubShell";
 import MobileTopBar from "./components/MobileTopBar";
+import NavDrawer from "./components/NavDrawer";
 import ModuleOff from "./components/ModuleOff";
 import SectionBoundary from "./components/SectionBoundary";
 import Skeleton from "./components/Skeleton";
@@ -371,7 +372,8 @@ function Shell() {
 
   // Esc closes the mobile nav drawer - unless a dialog above it already took this Escape: the focus trap
   // (useFocusTrap) preventDefaults the Escape it consumes, so ⌘K over the open drawer closes the palette
-  // on the first Escape and the drawer on the next, not both at once
+  // on the first Escape and the drawer on the next, not both at once. At phone width the drawer's own trap
+  // (components/NavDrawer.tsx) closes it first; this covers a drawer left open across a widened window
   useEffect(() => {
     if (!navOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !e.defaultPrevented && setNavOpen(false);
@@ -381,8 +383,8 @@ function Shell() {
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar — a sticky rail on desktop, an off-canvas drawer on mobile */}
-      <aside
+      {/* Sidebar — a sticky rail on desktop, an off-canvas drawer on mobile (inert while closed, a dialog while open) */}
+      <NavDrawer open={navOpen} onClose={() => setNavOpen(false)}
         className={`fixed inset-y-0 left-0 z-50 flex h-screen w-64 max-w-[80vw] shrink-0 flex-col border-r border-zinc-800 bg-zinc-950 p-3 transition-transform duration-200 print:hidden md:sticky md:inset-y-auto md:left-auto md:top-0 md:z-auto md:w-52 md:max-w-none md:translate-x-0 md:transition-none ${
           navOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="mb-4 px-2">
@@ -435,7 +437,7 @@ function Shell() {
             <br /><span data-testid="local-only-line">{localOnlyLine(data.aiStatus)}</span>
           </div>
         </div>
-      </aside>
+      </NavDrawer>
       {/* Drawer backdrop (mobile only) */}
       {navOpen && (
         <div className="fixed inset-0 z-40 bg-black/60 md:hidden" aria-hidden="true"
@@ -450,7 +452,7 @@ function Shell() {
         {/* the demo build's banner, above every page and in the flow (nothing in any other build) */}
         <DemoBanner />
         {/* Mobile top bar — hamburger (carrying the review count), current page, freshness, privacy eye, jump-to search */}
-        <MobileTopBar title={title} reviewCount={reviewCount} privacy={privacy}
+        <MobileTopBar title={title} reviewCount={reviewCount} privacy={privacy} menuOpen={navOpen}
           onTogglePrivacy={() => setPrivacy(!privacy)} onOpenMenu={() => setNavOpen(true)}
           onOpenSearch={() => setPaletteOpen(true)}
           refresh={<RefreshPill onClick={() => setRefreshOpen(true)} bubble={false} />} notice={<RefreshUpdatedStrip />} />

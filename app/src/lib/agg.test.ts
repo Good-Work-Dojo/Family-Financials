@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Additional terms: see NOTICE
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { AppData, CashflowMonth, Transaction } from "../data/types";
 import { HAVE_EXPORTS, readExport, requireExports } from "../test/exports";
+import { withoutComments } from "../test/sourceText";
 import { cfmFactory, txFactory } from "./__fixtures__";
 import {
   comparePeriods, countedRows, coverageFloor, coverageFloorLabel, coverageMonths, currentYear, dataThrough, datedAhead, daysInMonth,
@@ -486,5 +490,18 @@ describe("vendorStats over split purchases", () => {
     // a category filter that keeps one part still counts the purchase once at the part's amount
     const [g] = vendorStats(rows.filter((t) => t.category === "Groceries"));
     expect([g.total, g.count]).toEqual([310, 2]);
+  });
+});
+
+// the income types are one set (INCOME_TYPES, the ETL's models.INCOME_TYPES): a page that needs them imports it
+describe("the income types are declared once", () => {
+  it("no application file but lib/agg.ts spells the set out", () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+    const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? (e.name === "test" ? [] : files(join(dir, e.name)))
+      : /\.tsx?$/.test(e.name) && !/\.test\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []);
+    const spelled = files(root).filter((f) =>
+      /\[\s*"income"\s*,\s*"dividend"\s*,\s*"interest"\s*\]/.test(withoutComments(readFileSync(f, "utf8"))));
+    expect(spelled.map((f) => f.slice(root.length + 1))).toEqual(["lib/agg.ts"]);
   });
 });

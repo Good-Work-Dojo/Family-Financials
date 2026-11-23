@@ -581,6 +581,20 @@ CASES = [
     Case("overrides-not-a-list", [(OV, (), {"match": {}})], [(OV, "", "top level: expected a list")]),
     Case("override-earner", [(OV, (0, "set", "earner"), "Taylor")],
          [(OV, "[0].set.earner", "unknown earner 'Taylor' — one of: Alex, Sam, Robin")]),
+    # the Internal category files a row as internal only together with an internal type: alone it is spending
+    Case("override-internal-category-without-a-type", [(OV, (0, "set", "category"), "Internal")],
+         [(OV, "[0].set.category", "category 'Internal' with no internal type still counts the row in spending or "
+                                   "income — set type: transfer (transfer_rules.yaml or an override) instead")]),
+    Case("override-internal-category-on-a-purchase", [(OV, (1, "set", "category"), "Internal"),
+                                                      (OV, (1, "set", "subcategory"), DROP)],
+         [(OV, "[1].set.category", "category 'Internal' with no internal type still counts the row")]),
+    Case("keyword-rule-internal-category", [(CR, ("keyword_rules", 0, "category"), "Internal"),
+                                            (CR, ("keyword_rules", 0, "subcategory"), DROP)],
+         [(CR, "keyword_rules[0] (demo-cafe)", "category 'Internal' does not make a row internal, so it would still "
+                                               "count in spending or income — set type: transfer (transfer_rules.yaml "
+                                               "or an override) instead")]),
+    Case("vendor-pattern-internal-category", [(VR, ("patterns", 0, "category"), "Internal")],
+         [(VR, "patterns[0]", "category 'Internal' does not make a row internal")]),
     # category_rules.yaml: unknown keys, every rule's names in the taxonomy, every regex, the catch-all's place
     Case("category-rules-unknown-key", [(CR, ("keyword_rule",), [])], [(CR, "keyword_rule", "'keyword_rules'?")]),
     Case("keyword-rule-unknown-key", [(CR, ("keyword_rules", 0, "subcatgory"), "Coffee")],
@@ -753,6 +767,12 @@ def test_each_check_reports_its_problem_with_its_file_path_and_fix(tmp_path, cas
         # what it prints reads back as the same problem text (the form every older check returns)
         parsed = Problem.parse(str(p))
         assert str(parsed) == str(p) and parsed.file and parsed.message and parsed.fix
+
+
+@pytest.mark.parametrize("internal_type", ["transfer", "cc-payment", "investment"])
+def test_an_override_naming_internal_with_an_internal_type_is_valid(tmp_path, internal_type):
+    assert problems_of(tmp_path, [(OV, (1, "set", "type"), internal_type), (OV, (1, "set", "category"), "Internal"),
+                                  (OV, (1, "set", "subcategory"), internal_type)]) == []
 
 
 @pytest.mark.parametrize("url", ["https://llm.example.net/v1", "http://127.0.0.1:18210/v1", "http://localhost:18210",

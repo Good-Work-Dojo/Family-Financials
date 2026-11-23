@@ -766,6 +766,23 @@ def test_the_consent_keys_are_the_family_stores():
     assert all(k in prefs_ts for k in cache.CONSENT_KEYS)
 
 
+@pytest.mark.parametrize("from_refresh", [False, True])
+def test_switched_off_while_the_run_reads_the_data_it_sends_nothing(tmp_path, fake, monkeypatch, from_refresh):
+    """The run reads the household's data (seconds to a minute) after it first reads the switch; a family member who
+    switches the step off meanwhile is heard: the switch is read again just before the request, nothing is sent and
+    no run is counted."""
+    cfg = ready(tmp_path)
+    fake.answer(good())
+
+    def enriched_while_switched_off(config):
+        write_prefs(config, consent_doc(enabled=False, consented_at=None))
+        return rows()
+
+    monkeypatch.setattr(ai_cli, "_enriched", enriched_while_switched_off)
+    assert run(cfg, txns=None, from_refresh=from_refresh) == (0, [] if from_refresh else [ai_cli.OFF_WORDS["off"]])
+    assert fake.received == [] and run_log(cfg) == [] and stored(cfg) is None
+
+
 def test_with_no_key_stored_the_step_is_off_and_sends_nothing(tmp_path, fake):
     cfg = household(tmp_path)
     write_prefs(cfg)

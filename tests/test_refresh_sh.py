@@ -280,8 +280,8 @@ def test_a_failed_feed_still_reingests_and_reports_the_step(tree, hook):
     assert text.count("stub ingest ran") == 2
     assert text.count("data refresh has failed 2 runs in a row (steps: SimpleFIN-fetch)") == 1
     assert hook.texts() == [f"{HOUSEHOLD}: 🟠 data refresh has failed 2 runs in a row (steps: SimpleFIN-fetch). "
-                            "Balances are going stale. See fetch.log. (Repeat alerts suppressed until a refresh "
-                            "succeeds.)"]
+                            "Balances are going stale. See state/engine/fetch.log in the install. (Repeat alerts "
+                            "suppressed until a refresh succeeds.)"]
 
 
 def test_a_failure_streak_alerts_once_and_a_new_streak_alerts_again(tree, hook):
@@ -560,6 +560,23 @@ def test_with_no_feed_a_failed_ingest_still_alerts(tree, hook):
     assert status(tree)["steps_failed"] == ["ingest"]
     [text] = hook.texts()
     assert text.startswith(f"{HOUSEHOLD}: 🔴 data refresh FAILED (ingest errored; steps: ingest).")
+    assert "state/engine/fetch.log" in text and "./ff validate" in text and "docker compose" not in text
+
+
+def test_a_failed_step_says_where_its_lines_are_on_the_terminal(tree):
+    r = refresh(tree, STUB_INGEST_FAIL="1")
+    [said] = [line for line in r.stdout.splitlines() if "ingest failed" in line]
+    assert said == ("!!! ingest failed (exit 1): its lines are in state/engine/fetch.log in the install; ./ff "
+                    "validate lists config problems")
+
+
+def test_no_alert_names_a_docker_command_or_a_bare_log_name():
+    script = (ROOT / "deploy" / "refresh.sh").read_text("utf-8")
+    texts = re.findall(r'^\s*alert "([^"]*)"', script, re.M)
+    assert len(texts) >= 4
+    for text in texts:
+        assert "docker compose" not in text, text
+        assert re.sub(r"state/engine/fetch\.log", "", text).count("fetch.log") == 0, text
 
 
 def test_a_feed_that_goes_away_clears_its_connections(tree):

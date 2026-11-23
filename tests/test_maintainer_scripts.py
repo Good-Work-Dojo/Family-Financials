@@ -207,6 +207,10 @@ class Rig:
         for rel in TREE_FILES:
             (self.tree / rel).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / rel, self.tree / rel)
+        # the tree states one release of its own, whatever version the repository is at
+        (self.tree / "CHANGELOG.md").write_text(
+            "# Changelog\n\n## [1.0.0]\n\n### Added\n- An invented first release.\n\n[1.0.0]: https://example.net/1.0.0\n",
+            encoding="utf-8")
         self.bin = tmp / "bin"
         self.bin.mkdir()
         for name, body in (("gh", FAKE_GH), ("docker", FAKE_DOCKER), ("curl", FAKE_CURL)):

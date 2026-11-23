@@ -33,11 +33,12 @@ on any export shape change (`contract.test.ts`); a key or file is removed or ren
 is the 1.0 baseline; versions 1–22 came before 1.0, and no released image writes one.
 
 - **An OLDER export under a newer bundle** happens when a newer dashboard is served before an ingest rewrites the
-  exports (an older ETL image can still write them after the new bundle is up). `loadAppData` therefore gives every
-  key added after the baseline what "not there" means: a new export key gets its default there
-  (`loadAppData.test.ts`). It also still reads an export written before 1.0, each key such an export lacks given the
-  default its `with…` helper in `data/DataContext.tsx` states; `vendors.json` is an optional file whose 404 is its
-  placeholder.
+  exports (an older ETL image can still write them after the new bundle is up). The bundle reads exports from
+  `MIN_SCHEMA_VERSION` (`data/types.ts`, 23, the baseline) on: `loadAppData` gives every key added after it what "not
+  there" means (a new export key gets its default there, `loadAppData.test.ts`). An export set older than that is not
+  read at all (`OlderExportsError`): the page shows the same `notice-updated` banner, "The dashboard was updated — its
+  data is rebuilt at the next refresh; reload this page then", over the last good data when there is some, else
+  alone. `vendors.json` is an optional file whose 404 is its placeholder.
 - **A NEWER export under an older open tab** (it would read the new keys the old way — split parents as ordinary rows)
   and **a newer BUILD** (most deploys change the app and bump no schema) raise ONE persistent banner,
   `notice-updated`: "The dashboard was updated — reload this page". Never an auto-reload: an edit may be in flight.

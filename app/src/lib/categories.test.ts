@@ -8,7 +8,6 @@ import type { CategoryRename, ReservedNames } from "../data/types";
 import * as categories from "./categories";
 import {
   categoryVocab as vocabOf, NO_CATEGORY, SHIPPED_RESERVED, SHIPPED_TAXONOMY,
-  VOCABULARY_NAMES,
 } from "./categories";
 
 /** the vocabulary of a data set that keeps the shipped reserved names, read through `renames` */
@@ -277,13 +276,30 @@ describe("SHIPPED_TAXONOMY holds every name the vocabulary's classes are written
       expect(SHIPPED_TAXONOMY[c]?.includes(s), `${c} / ${s}`).toBe(true);
     }
   });
+  // read through the vocabulary itself (shipped reserved names, no rename): a list that lists its names gives them; a
+  // class only asked about is counted over the taxonomy, so a name misspelt in it matches nothing and the count drops
+  const shipped = categoryVocab([]);
   it("every category a class list names is a category of it", () => {
-    expect(VOCABULARY_NAMES.categories.length).toBeGreaterThan(10);
-    for (const c of VOCABULARY_NAMES.categories) expect(c in SHIPPED_TAXONOMY, `${c} is in no class list's taxonomy`).toBe(true);
+    const S = SHIPPED_RESERVED;
+    const essential = shipped.essentialLabels().categories;
+    expect(essential.length).toBeGreaterThan(6);
+    for (const c of [S.fallback_category, S.internal_category, S.income_category, ...essential]) {
+      expect(c in SHIPPED_TAXONOMY, `${c} is in no class list's taxonomy`).toBe(true);
+    }
+    expect(Object.keys(SHIPPED_TAXONOMY).filter((c) => shipped.isSubscriptionLike(c)), "both subscription-like categories")
+      .toHaveLength(2);
   });
   it("every category / subcategory pair a class list names is one of its seeded pairs", () => {
-    expect(VOCABULARY_NAMES.pairs.length).toBeGreaterThan(15);
-    for (const [c, s] of VOCABULARY_NAMES.pairs) expect(SHIPPED_TAXONOMY[c]?.includes(s), `${c} / ${s}`).toBe(true);
+    const S = SHIPPED_RESERVED;
+    const pairs = [
+      ...shipped.essentialLabels().pairs.map((p) => p.split(" / ") as [string, string]),
+      ...shipped.moneyMovementLabels().map((s): [string, string] => [S.fallback_category, s]),
+    ];
+    expect(pairs.length).toBeGreaterThan(9);
+    for (const [c, s] of pairs) expect(SHIPPED_TAXONOMY[c]?.includes(s), `${c} / ${s}`).toBe(true);
+    expect(SHIPPED_TAXONOMY[S.fees_category].filter((s) => shipped.isMarginInterest(s)), "margin interest").toHaveLength(1);
+    expect(SHIPPED_TAXONOMY[S.income_category].map((s) => shipped.passiveIncome(s)).filter((k) => k !== null).sort(),
+      "dividends and interest").toEqual(["dividends", "interest"]);
   });
 });
 

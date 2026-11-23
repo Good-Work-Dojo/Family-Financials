@@ -1,14 +1,22 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Additional terms: see NOTICE
-"""`python -m etl init [--answers FILE] [--force]` — the setup conversation that turns an empty install directory into
-a household: who it is, where the dashboard listens, the bank feed or the statement files, the optional pages, a
-passcode. `./ff init` runs it as the invoking user, the one command but a refresh that may reach the network (the bank
-feed's bridge, only when a setup token is given).
+"""`python -m etl init [--answers FILE] [--force | --feed]` — the setup conversation that turns an empty install
+directory into a household: who it is, where the dashboard listens, the bank feed or the statement files, the optional
+pages, a passcode. `./ff init` runs it as the invoking user, the one command but a refresh that may reach the network
+(the bank feed's bridge, only when a setup token is given).
 
 On a terminal it asks; with `--answers FILE` it reads a YAML file of the same answers (below) and asks nothing. It is
 safe to run again: whatever is already on disk is kept and not asked again — household.yaml, the listen settings in
 .env, accounts.yaml, a passcode, the bank feed's credential — so a run stopped part way finishes where it stopped.
-`--force` asks again for household.yaml and accounts.yaml and replaces them; nothing else is ever overwritten.
+`--force` asks again for household.yaml and accounts.yaml and replaces them, each copied first to <name>.previous
+(0600); nothing else is ever overwritten.
+
+`--feed` connects a bank feed to a household set up already and runs that step alone (`feed_step`): each feed account
+accounts.yaml does not name becomes one of the household's accounts that no feed id names yet, or one whose feed ids
+the feed no longer lists (`feed.accounts:` entry `{account: <its id>}`; it gets simplefin_id, its old one moved to
+simplefin_id_history, and a simplefin_cutover when it has statement files and none yet), a new account, or is
+skipped. The new lines are added to accounts.yaml in place, every other line kept (the file as it was is
+accounts.yaml.previous); household.yaml is never touched.
 
 The steps, each written as soon as it is answered:
   1. household.yaml: the household's name, the adults and children, the name for what is held jointly, the time
@@ -70,7 +78,7 @@ import sys
 import threading
 import unicodedata
 import zoneinfo
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -286,6 +294,16 @@ def _write_yaml(path: Path, header: str, doc: dict) -> None:
     install.write_atomic(path, text.encode("utf-8"), 0o644)
 
 
+def keep_previous(path: Path, *, out) -> None:
+    """A config file about to be replaced, copied first to <name>.previous (0600, over an older copy), said in one
+    line; nothing when there is no such file."""
+    if not path.is_file():
+        return
+    previous = path.with_name(f"{path.name}.previous")
+    install.write_atomic(previous, path.read_bytes(), 0o600)
+    out(f"{path.name} as it was is kept as {install.shown(previous)}")
+
+
 def household_step(conv: Conversation, config_dir: Path, *, force: bool, out) -> dict:
     """household.yaml: kept when it is there (without --force), else asked and written."""
     path = config_dir / "household.yaml"
@@ -334,6 +352,7 @@ def household_step(conv: Conversation, config_dir: Path, *, force: bool, out) ->
         # a minute of the household's own, so installs do not all reach the bank feed at once
         "refresh": {"minute": random.SystemRandom().randrange(60)},
     }
+    keep_previous(path, out=out)
     _write_yaml(path, HOUSEHOLD_HEADER, doc)
     out(f"wrote {install.shown(path)}")
     return doc
@@ -478,12 +497,12 @@ def _hinted_kind(*texts: str) -> str:
     return "checking"
 
 
-def read_feed(places: FeedPlaces, zone: str, *, out) -> tuple[list[FeedAccount], dt.date]:
-    """The feed's accounts from its newest snapshot, fetched once when none is stored yet (the module's own fetch:
-    the full window a store without a snapshot asks for, kept as the household's first snapshot), and the day it
-    was taken on the household's clock."""
+def read_feed(places: FeedPlaces, zone: str, *, out, fresh: bool = False) -> tuple[list[FeedAccount], dt.date]:
+    """The feed's accounts from its newest snapshot, fetched once when none is stored yet or `fresh` asks for one (the
+    module's own fetch: the full window a store without a snapshot asks for, kept as the household's first snapshot),
+    and the day it was taken on the household's clock."""
     snaps = places.find_simplefin_snapshots()
-    if snaps:
+    if snaps and not fresh:
         snap = snaps[-1]
         out("the bank feed's accounts are read from its newest snapshot (no new request)")
     else:
@@ -492,6 +511,9 @@ def read_feed(places: FeedPlaces, zone: str, *, out) -> tuple[list[FeedAccount],
         except SystemExit as e:
             raise Refused(f"the bank feed is connected, but its accounts could not be read ({e}): run init again "
                           "later; the connection is kept, so no new setup token is needed") from None
+        if snap is None:
+            raise Refused("the bank feed is connected but lists no account yet: connect your banks at SimpleFIN "
+                          "Bridge, then run init again; the connection is kept, so no new setup token is needed")
     try:
         doc = json.loads(snap.read_bytes())
     except (OSError, ValueError):
@@ -643,19 +665,34 @@ class _Ids:
 
 
 def map_feed(conv: Conversation, accounts: list[FeedAccount], owners: list[str], joint: str, ids: _Ids, *,
-             out) -> dict[str, tuple[str, dict]]:
-    """Each feed account given a kind and an owner, or skipped: {feed id: (account id, accounts.yaml entry)}."""
+             out, existing: dict[str, str] | None = None, attached: dict[str, str] | None = None,
+             relinked: Collection[str] = (), mortgage_taken: bool = False) -> dict[str, tuple[str, dict]]:
+    """Each feed account given a kind and an owner, or skipped: {feed id: (account id, accounts.yaml entry)}. With
+    `existing` ({account id: name}, the household's accounts the feed reads under no id it lists), a feed account may
+    instead be one of those, each taken once: `attached` gets {feed id: account id}. On a terminal "a new account" is
+    the default answer, except while one of `relinked` (accounts whose feed id the feed no longer lists) is offered:
+    then there is none, as such an account is likely the one the feed lists anew."""
     chosen: dict[str, tuple[str, dict]] = {}
-    mortgage_taken = False
+    free = dict(existing or {})
     for i, a in enumerate(accounts, 1):
         key_names = [a.id, a.name]
         if conv.answers is not None:
             given = _entry_choice(conv, "feed.accounts", key_names)
             if given is MISSING:
                 raise Refused(f"the answers file says nothing about the bank feed account {a.name} ({a.id}): add it "
-                              "under feed.accounts as {kind: ..., owner: ...} or skip; the bank feed stays connected, "
-                              "so run init again with it")
+                              "under feed.accounts as {kind: ..., owner: ...}"
+                              + (", {account: <an account of yours>}" if existing is not None else "")
+                              + " or skip; the bank feed stays connected, so run init again with it")
             if given == SKIP:
+                continue
+            if existing is not None and isinstance(given, dict) and "account" in given:
+                target = str(given["account"])
+                if target not in free:
+                    raise Refused(f"the answers file's feed.accounts entry for {a.name}: {target} is not an account "
+                                  "of yours that the bank feed does not read yet (or another feed account took it)")
+                del free[target]
+                if attached is not None:
+                    attached[a.id] = target
                 continue
             if not isinstance(given, dict):
                 raise Refused(f"the answers file's feed.accounts entry for {a.name}: write {{kind: ..., owner: ...}} "
@@ -667,6 +704,20 @@ def map_feed(conv: Conversation, accounts: list[FeedAccount], owners: list[str],
             mortgage = bool(given.get("mortgage")) and kind == "loan"
         else:
             out(f"Bank feed account {i} of {len(accounts)}: {a.name} at {a.institution} (balance {a.balance})")
+            if free:
+                options = [*((aid, f"your {name} ({aid})" + (", which the bank feed listed under another id"
+                                                              if aid in relinked else ""))
+                             for aid, name in free.items()),
+                           ("new", "a new account"), (SKIP, "skip this account")]
+                picked = conv.choice("", "Which account is it?", options,
+                                     default=MISSING if relinked and set(relinked) & free.keys() else "new")
+                if picked == SKIP:
+                    continue
+                if picked != "new":
+                    del free[picked]
+                    if attached is not None:
+                        attached[a.id] = picked
+                    continue
             kind = conv.choice("", "What kind of account is it?", _kind_options(skip="skip this account"),
                                default=a.kind)
             if kind == SKIP:
@@ -757,30 +808,7 @@ def accounts_step(conv: Conversation, root: Path, config_dir: Path, household: d
         out(f"accounts.yaml is kept as it is ({install.shown(path)})")
         return
     places = feed_places(root)
-    cred = places.simplefin_credential_path
-    connected = False
-    if cred.is_file() and cred.stat().st_size == 0:
-        cred.unlink()
-        out("an earlier setup left an empty bank feed credential (its claim did not finish): it is removed")
-    if cred.exists():
-        connected = True
-        out("the bank feed is already connected: its accounts are listed again, and no setup token is needed")
-        if conv.answers is not None and conv.given("feed.token") not in (MISSING, None, ""):
-            out("the setup token in the answers file is not used: the bank feed is already connected")
-        if offline and not places.find_simplefin_snapshots():
-            raise Refused("listing the bank feed's accounts needs the network, which this run was not given: run "
-                          "./ff init again and say yes to connecting the bank feed (or keep the feed: block in the "
-                          "answers file)")
-    elif offline:
-        if conv.answers is not None and conv.given("feed.token") not in (MISSING, None, ""):
-            raise Refused("the answers file holds a setup token, but this run was not given the network: ./ff gives "
-                          "init the network when the answers file has a feed: block")
-        out("the bank feed is not connected now: to connect it later, run ./ff init --force and say yes to it")
-    else:
-        token = conv.secret("feed.token", "Paste your bank feed's setup token, or press Enter to add it later:")
-        if token:
-            connect(places, token, out=out)
-            connected = True
+    connected = connection(conv, places, offline=offline, out=out) is not None
     owners = _owners(household)
     joint = str(household.get("joint_label") or "Joint")
     ids = _Ids()
@@ -813,11 +841,317 @@ def accounts_step(conv: Conversation, root: Path, config_dir: Path, household: d
                      "simplefin_cutover": (day + dt.timedelta(days=1)).isoformat()}
         accounts[account_id] = entry
     accounts.update(new)
+    keep_previous(path, out=out)
     _write_yaml(path, ACCOUNTS_HEADER, {"version": 1, "accounts": accounts})
     out(f"wrote {install.shown(path)} with {len(accounts)} account{'s' if len(accounts) != 1 else ''}")
     if not accounts:
         out("no account yet: put statement files in imports/ (./ff import detect <file> says what each is) and name "
-            "them in config/accounts.yaml, or run ./ff init --force with a bank feed setup token")
+            "them in config/accounts.yaml, or connect a bank feed with ./ff init --feed")
+
+
+def connection(conv: Conversation, places: FeedPlaces, *, offline: bool, out) -> bool | None:
+    """The bank feed's connection: the stored one (False), one made now with a setup token (True), or None when there
+    is none. An empty credential a claim left unfinished is removed first. Offline, no token is asked or taken, and a
+    stored connection with no snapshot yet is refused (its accounts cannot be listed)."""
+    cred = places.simplefin_credential_path
+    if cred.is_file() and cred.stat().st_size == 0:
+        cred.unlink()
+        out("an earlier setup left an empty bank feed credential (its claim did not finish): it is removed")
+    given_token = conv.answers is not None and conv.given("feed.token") not in (MISSING, None, "")
+    if cred.exists():
+        out("the bank feed is already connected: its accounts are listed again, and no setup token is needed")
+        if given_token:
+            out("the setup token in the answers file is not used: the bank feed is already connected")
+        if offline and not places.find_simplefin_snapshots():
+            raise Refused("listing the bank feed's accounts needs the network, which this run was not given: run "
+                          "./ff init again and say yes to connecting the bank feed (or keep the feed: block in the "
+                          "answers file)")
+        return False
+    if offline:
+        if given_token:
+            raise Refused("the answers file holds a setup token, but this run was not given the network: ./ff gives "
+                          "init the network when the answers file has a feed: block")
+        out("the bank feed is not connected now: to connect it later, run ./ff init --feed")
+        return None
+    token = conv.secret("feed.token", "Paste your bank feed's setup token, or press Enter to add it later:")
+    if not token:
+        return None
+    connect(places, token, out=out)
+    return True
+
+
+# ------------------------------------------------------------------ --feed: a bank feed for a household set up already
+
+def _read_doc(path: Path) -> tuple[str, dict]:
+    """A config file's text and its mapping, or Refused saying what to do."""
+    try:
+        text = path.read_text("utf-8")
+    except FileNotFoundError:
+        raise Refused("there is no household to connect a bank feed to yet: run ./ff init first") from None
+    except (OSError, UnicodeDecodeError):
+        text = None
+    try:
+        doc = yaml.safe_load(text) if text is not None else None
+    except yaml.YAMLError:
+        doc = None
+    if not isinstance(doc, dict):
+        raise Refused(f"{install.shown(path)} cannot be read: correct it (./ff validate says how), then run ./ff init "
+                      "--feed again")
+    return text, doc
+
+
+def _feed_ids(entry: dict) -> list[str]:
+    history = entry.get("simplefin_id_history")
+    return [str(x) for x in (entry.get("simplefin_id"), *(history if isinstance(history, list) else ())) if x]
+
+
+def last_file_days(config_dir: Path, wanted: list[str]) -> dict[str, dt.date]:
+    """The newest day of each `wanted` account's statement-file rows, as an ingest keeps them: its files read with
+    their formats, each source's rows in its own days, a file read for another account left out. When the ETL cannot
+    load the config, the data end the last export states for the account instead. An account with no such day is
+    left out."""
+    from .config import Config
+    from .pipeline import format_parse, read_statement
+    from .validate import ConfigError
+    try:
+        cfg = Config(config_dir)
+    except ConfigError:
+        return _exported_ends(wanted)
+    readers = cfg.statement_file_readers()
+    out: dict[str, dt.date] = {}
+    for aid in wanted:
+        sources = cfg.txn_sources(aid) if aid in cfg.accounts else []
+        for k, source in enumerate(sources):
+            start, end = source.since, sources[k + 1].since if k + 1 < len(sources) else None
+            parse = format_parse(source.format, cfg.presets)
+            for path in cfg.find_sources(source.glob):
+                if readers.get(path, [aid])[0] != aid:
+                    continue
+                read = read_statement(parse, path, aid)[0]
+                days = [t.date for t in read[0] if not (start and t.date < start) and not (end and t.date >= end)] \
+                    if read is not None else []
+                if days:
+                    day = dt.date.fromisoformat(max(days))
+                    out[aid] = max(out.get(aid, day), day)
+    return out
+
+
+def _exported_ends(wanted: list[str]) -> dict[str, dt.date]:
+    """Each `wanted` account's `txn_data_end` in the last export's accounts.json, where it states one."""
+    try:
+        doc = json.loads((Paths().data_dir() / "exports" / "accounts.json").read_bytes())
+        rows = {a["id"]: a.get("txn_data_end") for a in doc["accounts"] if isinstance(a, dict)}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    out = {}
+    for aid in wanted:
+        try:
+            out[aid] = dt.date.fromisoformat(rows[aid])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _source_problem(name: str, entry: dict, cutover: str) -> str | None:
+    """The refusal's words when a cutover on `cutover` would leave one of the account's later sources no day of its
+    own (validate refuses a `since` on or after the cutover), else None."""
+    sources = entry.get("sources")
+    for i, source in enumerate(sources[1:] if isinstance(sources, list) else [], 2):
+        since = source.get("since") if isinstance(source, dict) else None
+        if since is not None and str(since) >= cutover:
+            return (f"{name}: the bank feed would own its days from {cutover}, but source {i} of its statement files "
+                    f"starts on {since}, so that source would keep no row: give it an earlier since in accounts.yaml "
+                    "or remove it, then run ./ff init --feed again; accounts.yaml is as it was, and the bank feed "
+                    "stays connected")
+    return None
+
+
+def feed_step(conv: Conversation, root: Path, config_dir: Path, *, out, offline: bool = False) -> None:
+    """`init --feed`: the bank feed connected to a household set up already (with a setup token, unless it is
+    connected), and each feed account accounts.yaml does not name yet made one of the household's accounts that no
+    feed id names or whose feed ids the feed no longer lists, a bank re-linked under a new id (which gets the feed's
+    id, its old one moved to its simplefin_id_history, and when it has statement files a simplefin_cutover the day after the
+    later of the feed's earliest transaction and the files' last row: refused, writing nothing, when a later source's
+    since would fall on or after it), a new account, or skipped. household.yaml and every other entry are left as they
+    are: the new lines are added to accounts.yaml where they belong, the file as it was kept as accounts.yaml.previous."""
+    _, household = _read_doc(config_dir / "household.yaml")
+    path = config_dir / "accounts.yaml"
+    text, doc = _read_doc(path)
+    if not isinstance(doc.get("accounts") or {}, dict):
+        raise Refused(f"{install.shown(path)}: accounts is not a mapping of accounts: correct it (./ff validate says "
+                      "how), then run ./ff init --feed again")
+    registry = doc.get("accounts") or {}
+    accounts = {str(aid): e for aid, e in registry.items() if isinstance(e, dict)}
+    places = feed_places(root)
+    made = connection(conv, places, offline=offline, out=out)
+    if made is None:
+        out("no bank feed was connected: accounts.yaml is as it was")
+        return
+    feed_accounts, taken = read_feed(places, str(household.get("timezone")), out=out, fresh=made)
+    ignored = (doc.get("simplefin") or {}).get("ignore") if isinstance(doc.get("simplefin"), dict) else None
+    known = {fid for e in accounts.values() for fid in _feed_ids(e)} | {str(x) for x in ignored or ()}
+    unknown = [a for a in feed_accounts if a.id not in known]
+    if not unknown:
+        out("every account the bank feed lists is in accounts.yaml already: nothing to add")
+        return
+    out(f"the bank feed lists {len(unknown)} account{'s' if len(unknown) != 1 else ''} accounts.yaml does not name")
+    ids = _Ids()
+    ids.ids.update(str(aid) for aid in registry)
+    ids.names.update(str(e.get("name", "")).casefold() for e in accounts.values())
+    # the accounts a feed account may be: those no feed id names, and those whose feed ids the feed no longer lists (a
+    # bank re-linked under a new id)
+    listed = {a.id for a in feed_accounts}
+    relinked = {aid for aid, e in accounts.items() if _feed_ids(e) and not listed & set(_feed_ids(e))}
+    free = {aid: str(e.get("name") or aid) for aid, e in accounts.items() if not _feed_ids(e) or aid in relinked}
+    attached: dict[str, str] = {}
+    entries = map_feed(conv, unknown, _owners(household), str(household.get("joint_label") or "Joint"), ids,
+                       out=out, existing=free, attached=attached, relinked=relinked,
+                       mortgage_taken=any(e.get("mortgage") is True for e in accounts.values()))
+    first_days = {a.id: a.first_day for a in feed_accounts}
+    cut = {aid for aid in attached.values()
+           if (accounts[aid].get("parser") or accounts[aid].get("glob") or accounts[aid].get("sources"))
+           and not accounts[aid].get("simplefin_cutover") and not accounts[aid].get("simplefin_balances_only")}
+    file_days = last_file_days(config_dir, sorted(cut)) if cut else {}
+    adds: dict[str, dict] = {}
+    for fid, aid in attached.items():
+        entry, add = accounts[aid], {"simplefin_id": fid}
+        if aid in relinked and entry.get("simplefin_id"):
+            # its snapshots under the old id are still read, as the account's
+            history = entry.get("simplefin_id_history")
+            add["simplefin_id_history"] = [*(history if isinstance(history, list) else ()), entry["simplefin_id"]]
+            out(f"{free[aid]}: the bank feed's new id for it is {fid}; the old one, {entry['simplefin_id']}, is kept in "
+                "its simplefin_id_history")
+        if aid in cut:
+            # the files own the days before the cutover, the feed the days from it: the day after the later of the
+            # feed's first day (its window's first day may be partial) and the files' last, so no row the files hold
+            # is dropped
+            day = first_days.get(fid) or taken
+            add["simplefin_cutover"] = (max(day, file_days.get(aid, day)) + dt.timedelta(days=1)).isoformat()
+            problem = _source_problem(free[aid], entry, add["simplefin_cutover"])
+            if problem:
+                raise Refused(problem)
+            out(f"{free[aid]}: its statement files own the days before {add['simplefin_cutover']}, the bank feed the "
+                "days from it")
+        adds[aid] = add
+    new = dict(entries.values())
+    if not adds and not new:
+        out("no bank feed account was added: accounts.yaml is as it was")
+        return
+    expected = yaml.safe_load(text)
+    expected["accounts"] = expected.get("accounts") or {}
+    for aid, add in adds.items():
+        expected["accounts"][aid].update(add)
+    expected["accounts"].update(new)
+    merged = merged_accounts_text(text, adds, new)
+    try:
+        exact = merged is not None and yaml.safe_load(merged) == expected
+    except yaml.YAMLError:
+        exact = False
+    keep_previous(path, out=out)
+    if exact:
+        install.write_atomic(path, merged.encode("utf-8"), stat.S_IMODE(path.stat().st_mode))
+    else:
+        _write_yaml(path, ACCOUNTS_HEADER, expected)
+        out("accounts.yaml could not be added to line by line, so it was written again whole, its comments left out")
+    out(f"accounts.yaml: the bank feed reads {len(adds)} of your accounts and {len(new)} new "
+        f"one{'s' if len(new) != 1 else ''}; every other line is as it was")
+
+
+def _content(line: str) -> bool:
+    text = line.strip()
+    return bool(text) and not text.startswith("#")
+
+
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+_KEY = re.compile(r"""("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#'"{\[\-?][^:#]*?)\s*:(?=\s|$)(.*)$""")
+_HEAD = re.compile(r"accounts:(\s*\{\s*\})?\s*(#.*)?")
+
+
+def _dumped(doc: dict, indent: int) -> list[str]:
+    text = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    return [" " * indent + line + "\n" for line in text.splitlines()]
+
+
+def merged_accounts_text(text: str, attach: dict[str, dict], append: dict[str, dict]) -> str | None:
+    """accounts.yaml's text with `attach`'s keys added at the end of those block-style entries (a key the entry has
+    already written where it stands, its old value's lines replaced) and `append`'s entries added at the end of the
+    `accounts:` block, every other line as it was; None when the file is not in a shape this adds to line by line (a
+    flow-style entry or registry, tabs, an entry not found). The caller checks that the result reads as the whole
+    rewrite would."""
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    heads = [i for i, line in enumerate(lines) if _HEAD.fullmatch(line.rstrip("\n"))]
+    if len(heads) != 1 or "\t" in text:
+        return None
+    h = heads[0]
+    head = _HEAD.fullmatch(lines[h].rstrip("\n"))
+    end = next((j for j in range(h + 1, len(lines)) if _content(lines[j]) and _indent(lines[j]) == 0), len(lines))
+    body = [j for j in range(h + 1, end) if _content(lines[j])]
+    if head.group(1) and body:
+        return None
+    n = _indent(lines[body[0]]) if body else 2
+    children: dict[str, int] = {}
+    for j in body:
+        if _indent(lines[j]) < n:
+            return None
+        if _indent(lines[j]) == n:
+            m = _KEY.fullmatch(lines[j].rstrip("\n")[n:])
+            if m is None:
+                return None
+            try:
+                children[str(yaml.safe_load(m.group(1)))] = j
+            except yaml.YAMLError:
+                return None
+    inserts: dict[int, list[str]] = {}
+    replace: dict[int, list[str]] = {}
+    drop: set[int] = set()
+    for aid, add in attach.items():
+        j = children.get(aid)
+        if j is None or _content(_KEY.fullmatch(lines[j].rstrip("\n")[n:]).group(2)):
+            return None
+        stop = next((k for k in body if k > j and _indent(lines[k]) <= n), end)
+        inner = [k for k in body if j < k < stop]
+        if not inner or _indent(lines[inner[0]]) <= n:
+            return None
+        m = _indent(lines[inner[0]])
+        # the entry's own keys, each with its value's lines: the key's line and those below it up to the next key
+        keys: dict[str, list[int]] = {}
+        for k in inner:
+            found = _KEY.fullmatch(lines[k].rstrip("\n")[m:]) if _indent(lines[k]) == m else None
+            if found is not None:
+                try:
+                    keys[str(yaml.safe_load(found.group(1)))] = [k]
+                except yaml.YAMLError:
+                    return None
+            elif _indent(lines[k]) < m or not keys:
+                return None
+            else:
+                keys[next(reversed(keys))].append(k)
+        new = {}
+        for key, value in add.items():
+            if key in keys:
+                replace[keys[key][0]] = _dumped({key: value}, m)
+                drop.update(keys[key][1:])
+            else:
+                new[key] = value
+        if new:
+            inserts.setdefault(inner[-1], []).extend(_dumped(new, m))
+    if append:
+        inserts.setdefault(body[-1] if body else h, []).extend(_dumped(append, n))
+    out = []
+    for i, line in enumerate(lines):
+        if i == h and head.group(1):
+            line = "accounts:" + (f"  {head.group(2)}" if head.group(2) else "") + "\n"
+        if i in replace:
+            out.extend(replace[i])
+        elif i not in drop:
+            out.append(line)
+        out.extend(inserts.get(i, []))
+    return "".join(out)
 
 
 def passcode_step(conv: Conversation, root: Path, household: dict, *, out) -> None:
@@ -908,10 +1242,13 @@ def _said_saved(cred: Path | None, before: bool) -> None:
 
 def run(answers_file: str | None = None, *, force: bool = False, out: Callable[[str], None] = print,
         ask: Callable[[str], str] | None = None, secret: Callable[[str], str] | None = None,
-        offline: bool = False) -> int:
-    """`init`: the steps in order, then validate and what to do next."""
+        offline: bool = False, feed: bool = False) -> int:
+    """`init`: the steps in order (with `feed`, the bank feed's step alone), then validate and what to do next."""
     cred, connected_before = None, False
     try:
+        if feed and force:
+            raise Refused("--feed connects a bank feed to the household as it is, and --force asks for the household "
+                          "again: give one of them")
         root = install.home()
         cred = feed_places(root).simplefin_credential_path
         connected_before = _holds_bytes(cred)
@@ -920,15 +1257,22 @@ def run(answers_file: str | None = None, *, force: bool = False, out: Callable[[
             raise Refused("there is no terminal to ask on: run ./ff init in a terminal, or give --answers FILE")
         conv = Conversation(answers, ask=ask, secret=secret, out=out)
         install.ensure_dirs(root, out=out)
-        if answers is not None:
-            precheck(conv)
         config_dir = Paths().config_dir
-        household = household_step(conv, config_dir, force=force, out=out)
-        env = listen_step(conv, root, out=out)
-        accounts_step(conv, root, config_dir, household, force=force, out=out, offline=offline)
-        passcode_step(conv, root, household, out=out)
-        install.copy_starters(config_dir, Paths().starter_dir(), out=out)
-        install.ensure_compose(root, out=out)
+        if feed:
+            feed_step(conv, root, config_dir, out=out, offline=offline)
+            done = ("Done. The bank feed is read at the next refresh: ./ff refresh runs one now (./ff up first when "
+                    "the dashboard is not running).")
+        else:
+            if answers is not None:
+                precheck(conv)
+            household = household_step(conv, config_dir, force=force, out=out)
+            env = listen_step(conv, root, out=out)
+            accounts_step(conv, root, config_dir, household, force=force, out=out, offline=offline)
+            passcode_step(conv, root, household, out=out)
+            install.copy_starters(config_dir, Paths().starter_dir(), out=out)
+            install.ensure_compose(root, out=out)
+            done = ("Done. Next: ./ff up starts the dashboard and builds its data; then open " + install.address(env)
+                    + " and sign in with your passcode.")
     except Refused as e:
         print(f"init: {e}", file=sys.stderr)
         return 2
@@ -944,6 +1288,5 @@ def run(answers_file: str | None = None, *, force: bool = False, out: Callable[[
     if validate_now(out=out):
         out("The config has the problems above: correct them, then run ./ff validate")
         return 1
-    out("Done. Next: ./ff up starts the dashboard; then open " + install.address(env)
-        + " and sign in with your passcode.")
+    out(done)
     return 0

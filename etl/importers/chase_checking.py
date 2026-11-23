@@ -54,7 +54,10 @@ def parse(path: Path, account_id: str) -> tuple[list[Txn], FileStats, dict]:
                             amount_cents=amount, source_file=path.name,
                             bank_type=bank_type, seq=i))
             stats.observe(date, amount)
-            bal = parse_cents(row[idx["Balance"]]) if len(row) > idx["Balance"] else None
+            try:
+                bal = parse_cents(row[idx["Balance"]]) if len(row) > idx["Balance"] else None
+            except ValueError:              # a Balance cell that is no amount: the row is read without its balance
+                bal = None
             if bal is not None and (latest_balance is None or date > latest_balance[0]):
                 latest_balance = (date, bal)
 

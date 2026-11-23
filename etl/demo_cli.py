@@ -53,8 +53,26 @@ parcel pasta peach pelican penguin pickle pilot pixel pretzel puffin puzzle quiv
 """.split())
 
 
+# the profile plants two warnings so the Data page shows how each reads (tests/test_ff_demo.py pins that they are its
+# only ones)
+PLANTED_WARNINGS = ("The two warnings above are part of the demo: an account the bank feed stopped reporting, and a "
+                    "bank feed account no account of the household maps. The Data page shows both.")
+
+
 def passphrase(n: int = 4) -> str:
     return "-".join(secrets.choice(WORDS) for _ in range(n))
+
+
+def is_demo(cfg) -> bool:
+    """Whether a loaded config is the demo's: its household is the invented one by name (tools/demo/household.py), and
+    every bank feed id its accounts name is one the demo's feed gives. False where the image holds no demo
+    generator."""
+    try:
+        _, household = _generator()
+    except Refused:
+        return False
+    ids = {a.feed_id for a in household.ACCOUNTS.values()}
+    return getattr(cfg, "household_name", None) == household.NAME and set(cfg.simplefin_map()) <= ids
 
 
 def _generator():
@@ -133,6 +151,7 @@ def _run(*, force: bool, out: Callable[[str], None], now: dt.datetime) -> int:
         raise Refused("the generated household does not validate (above): this is a fault of the release") from None
     if pipeline.run(cfg=cfg) != 0:
         raise Refused("the demo's ingest failed (above): this is a fault of the release")
+    out(PLANTED_WARNINGS)
     from . import passcode_cli
     phrase = passphrase()
     old = os.umask(0o077)

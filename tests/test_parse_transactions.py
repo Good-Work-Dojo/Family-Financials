@@ -29,6 +29,7 @@ from etl import pipeline
 from etl.config import Config, Source
 from etl.importers import registry
 from etl.models import FileStats, Txn
+from etl.validate import shared_file_notes
 
 CARD, FEED = "demo_card_0000", "demo_feed_0000"
 GLOB = "SampleCard_Activity_*.csv"
@@ -539,6 +540,76 @@ def test_a_checking_file_with_another_header_fails_its_check_and_the_household_s
     txns = json.loads((out / "transactions.json").read_text("utf-8"))["transactions"]
     assert {t["source_file"] for t in txns} == {good, f"{CARD}-2030-01.csv"}
     assert sum(t["account"] == CHK for t in txns) == good_rows > 0
+
+
+# ------------------------------------------------------------------ files two accounts match
+
+def test_files_an_earlier_account_reads_are_left_out_by_a_later_one_which_fails_one_check(tmp_path):
+    """Two cards at one bank whose exports share a prefix: the first card listed reads its files; the second, whose
+    `sources:` pattern also matches them, reads only its own and fails one check counting the others, five named,
+    each with the account that reads it. Each account still reconciles."""
+    other = "demo_card_1111"
+    second = {**_account("credit-card", "chase_card", "unused"), "name": "Second Card"}
+    del second["parser"], second["glob"]
+    second["sources"] = [{"format": "chase_card", "glob": "SampleCard_*.csv"}]
+    cfg = _household(tmp_path, {CARD: _account("credit-card", "chase_card", GLOB), other: second})
+    for month in range(1, 7):
+        _export(tmp_path, f"SampleCard_Activity_2030{month:02d}01.csv", [(f"{month:02d}/04/2030", "SAMPLE GROCER", "-40.00")])
+    _export(tmp_path, "SampleCard_Other_20300101.csv", [("01/09/2030", "SAMPLE CAFE", "-4.00")])
+    p = _parsed(tmp_path, cfg)
+    assert sorted((t.account_id, t.source_file) for t in p.txns) == [
+        *[(CARD, f"SampleCard_Activity_2030{m:02d}01.csv") for m in range(1, 7)],
+        (other, "SampleCard_Other_20300101.csv")]
+    assert [(c.name, c.status, c.detail) for c in p.checks if c.name.startswith("import.")] == [
+        (f"import.matched_by_accounts.{other}", "fail",
+         "6 files this account's file pattern matches are read for another account: "
+         "SampleCard_Activity_20300101.csv (Sample credit-card), SampleCard_Activity_20300201.csv (Sample credit-card), "
+         "SampleCard_Activity_20300301.csv (Sample credit-card), SampleCard_Activity_20300401.csv (Sample credit-card), "
+         "SampleCard_Activity_20300501.csv (Sample credit-card), and 1 more. A statement file is read for one account "
+         "only, the first listed whose pattern matches it and whose format reads it, so this account leaves them out: "
+         "give each account a file pattern that matches only its own files (accounts.yaml sources)."),
+        (f"import.sources.{other}", "info", "Read from one source: chase_card kept 1 row.")]
+    for account in (CARD, other):
+        stored = sum(t.amount_cents for t in p.txns if t.account_id == account)
+        assert p.acct_file_sums[account] - p.acct_dedup_sums.get(account, 0) == stored
+    assert sorted(p.file_stats, key=lambda s: s.source_file)[-1].account == other
+
+
+CHECKING_HEADER = "Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #\n"
+
+
+def test_a_file_an_earlier_accounts_format_refuses_is_read_by_the_later_account_whose_format_reads_it(tmp_path):
+    """A checking account listed first with a broad `*.csv` pattern, and a card account after it: the card's export is
+    matched by both, but the checking format refuses it, so it is the card's, with no failing check; the checking
+    account's own export stays its own. Both accounts reconcile."""
+    checking = "demo_bank_0000"                 # listed first: the registry's ids are written sorted
+    cfg = _household(tmp_path, {checking: _account("checking", "chase_checking", "*.csv"),
+                                CARD: _account("credit-card", "chase_card", GLOB)})
+    _export(tmp_path, "SampleCard_Activity_20300131.csv", [("01/04/2030", "SAMPLE GROCER", "-40.00")])
+    (tmp_path / "src" / "SampleChecking_20300131.csv").write_text(
+        CHECKING_HEADER + "DEBIT,01/06/2030,SAMPLE CAFE,-5.00,DEBIT_CARD,995.00,\n")
+    assert cfg.statement_file_readers() == {
+        tmp_path / "src" / "SampleCard_Activity_20300131.csv": [CARD],
+        tmp_path / "src" / "SampleChecking_20300131.csv": [checking]}
+    p = _parsed(tmp_path, cfg)
+    assert sorted((t.account_id, t.source_file) for t in p.txns) == [
+        (checking, "SampleChecking_20300131.csv"), (CARD, "SampleCard_Activity_20300131.csv")]
+    assert [c for c in p.checks if c.status == "fail"] == []
+    assert shared_file_notes(cfg) == []
+    for account in (CARD, checking):
+        stored = sum(t.amount_cents for t in p.txns if t.account_id == account)
+        assert p.acct_file_sums[account] - p.acct_dedup_sums.get(account, 0) == stored
+
+
+def test_a_file_no_matching_accounts_format_reads_stays_the_first_accounts_and_fails_its_own_check(tmp_path):
+    """Two accounts' patterns match a file neither format reads: it is the first listed account's, whose import check
+    fails naming it, and the other account fails no check for it."""
+    second = "demo_card_1111"
+    cfg = _household(tmp_path, {CARD: _account("credit-card", "chase_card", "Sample*.csv"),
+                                second: {**_account("credit-card", "chase_card", "*.csv"), "name": "Second Card"}})
+    (tmp_path / "src" / "SampleNotes.csv").write_text("not,a,statement\n1,2,3\n")
+    p = _parsed(tmp_path, cfg)
+    assert [(name, status) for name, status, _ in _import_checks(p)] == [(f"import.{CARD}.SampleNotes.csv", "fail")]
 
 
 # ------------------------------------------------------------------ files no account reads

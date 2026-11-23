@@ -7,6 +7,7 @@ import type { AccountMeta } from "../data/types";
 import { isCashLike } from "./accounts";
 import { countOf, fmtUSD, fmtUSD0 } from "./format";
 import { amortize } from "./projections";
+import { COLLEGE_CLASS, RETIREMENT_CLASS } from "./tokens";
 
 export interface SecondHouseInputs {
   price: number;
@@ -146,15 +147,21 @@ export interface FundingRow {
   /** a draw (above zero) takes the account below zero by a cent or more — flagged, never clamped. An account already
    *  below zero with no draw is no overdraw: its balance is shown as it is */
   overdraw: boolean;
-  retirement: boolean;       // IRA/401k/529 — caution, not a block
+  retirement: boolean;       // a retirement or 529 account (isRetirementAccount) — caution, not a block
   taxableDrag: boolean;      // taxable brokerage/crypto — selling may realize gains
   cashLike: boolean;         // the Cash class (isCashLike): checking, savings, a brokerage's cash account
 }
 
-/** IRA/Roth/401k/529 by name — the registry doesn't type retirement distinctly
- *  (they're all kind "brokerage"), so this mirrors Tools.tsx's name-keyed map. */
+/** IRA/Roth/401k/529 by name: the fallback for an account whose class does not say (isRetirementAccount) */
 export function isRetirementName(name: string): boolean {
   return /\b(ira|roth|401|529)/i.test(name);
+}
+
+/** A retirement or college account, whose draw carries a penalty and no capital gain: by the class the exports resolve
+ *  for it (accounts.json `asset_class`: Retirement or 529, so a 403(b), a TSP, a 457 or an HSA filed as Retirement is
+ *  one), else by its name. */
+export function isRetirementAccount(a: Pick<AccountMeta, "asset_class" | "name">): boolean {
+  return a.asset_class === RETIREMENT_CLASS || a.asset_class === COLLEGE_CLASS || isRetirementName(a.name);
 }
 
 /** Everything except credit cards and loans can fund a purchase. */
@@ -163,7 +170,7 @@ export function eligibleFundingAccounts(accounts: AccountMeta[]): AccountMeta[] 
     a.latest_balance === null ? 4
     : a.kind === "checking" ? 0
     : isCashLike(a) ? 1       // the other Cash-class accounts: savings, a brokerage's cash account
-    : isRetirementName(a.name) ? 3
+    : isRetirementAccount(a) ? 3
     : 2;   // taxable brokerage / crypto / wallet
   return accounts
     .filter((a) => a.kind !== "credit-card" && a.kind !== "loan")
@@ -178,7 +185,7 @@ export function fundingRows(accounts: AccountMeta[], draws: Record<string, numbe
     const draw = Number.isFinite(raw) && raw! > 0 ? raw! : 0;
     const before = a.latest_balance;
     const after = before === null ? null : before - draw;
-    const retirement = isRetirementName(a.name);
+    const retirement = isRetirementAccount(a);
     const cashLike = isCashLike(a);
     return {
       accountId: a.id, name: a.name, kind: a.kind, assetClass: a.asset_class, owner: a.owner,

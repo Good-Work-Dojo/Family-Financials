@@ -3,8 +3,7 @@
 A **local-first** household FP&A / net-worth app: a re-runnable offline Python ETL (`etl/`) reads a household's config,
 statement files and bank-feed snapshots into SQLite + JSON exports, and a React dashboard (`app/`) reads only those
 exports. This file is the map: `docs/configuration.md` is every config key, `docs/design/*.md` hold the mechanics (index
-at the end). New here: `docs/architecture.md` is the overview, `CONTRIBUTING.md` how a change gets in (no real data,
-the gate, the CLA). Where a section below disagrees with "Hard rules", the hard rules win.
+at the end). New here: `docs/architecture.md` is the overview, `CONTRIBUTING.md` how a change gets in. Where a section below disagrees with "Hard rules", the hard rules win.
 
 ## Hard rules
 - **Runner:** every workflow `runs-on` is a literal from `{ubuntu-24.04, ubuntu-24.04-arm}`; no expressions or lists.
@@ -34,14 +33,14 @@ the gate, the CLA). Where a section below disagrees with "Hard rules", the hard 
 | `python -m etl validate` / `make validate` | Every config problem at once, one `file: key.path: what — fix` line each (exit 1); `ingest` and `rules` refuse such a config with the same lines (exit 2, nothing written) |
 | `FF_HOME=<a copy of examples/minimal> python -m etl ingest` | The smallest household end to end (`examples/minimal/README.md`) |
 | `python -m etl import detect\|preview\|map\|banks` | Which formats read a file, what one reads, a household preset from a file, the bank table (offline) |
-| `./ff demo\|init`, `up\|down`, `doctor` | An install (`docs/design/platform.md`): the demo or a household's setup, the stack, its checks; also `backup`, `restore`, `upgrade`, `passcode`, `refresh`, `ai`, and `build` (in a checkout: both images, under the names `ff` runs) |
+| `./ff demo\|init`, `up\|down`, `doctor` | An install (`docs/design/platform.md`): the demo or a household's setup, the stack, its checks (`init --feed` adds a bank feed later); also `backup`, `restore`, `upgrade`, `passcode`, `refresh`, `ai`, `simplefin list-accounts` and `build` (in a checkout: both images, under the names `ff` runs) |
 | `make app` / `make` / `build` / `serve` | Dashboard dev server / `ingest` + `app` / production build / preview |
 | `make test` / `make lint` | lint + `pytest` + `vitest` + `tsc` (`test-etl` / `test-app`) / `ruff check etl tests deploy tools` + `eslint`; the harness's own tests run only in `ci.sh` |
 | `make refresh` / `fetch` / `backfill` | `fetch` + `ingest` / SimpleFIN: 90d first, then ~35d / a 90d gap fill (the stack runs `deploy/refresh.sh`) |
 | `python -m etl rules preview --file C.yaml` / `rules overlaps` | Dry-run candidate keyword rules / list dead and shadowed rules (offline, writes nothing; `./ff rules …` in an install) |
 | `python -m etl rules starter-diff [--starter DIR]` | The starter entries your rule files lack, a line each and a count (offline; `starter/README.md`) |
 | `tools/verify/demo.sh <dir> [profile…]` | Six invented households, generated and ingested offline (`full` has every feature), each an `FF_HOME` tree with `truth.json` (`tools/demo/README.md`) |
-| `tools/verify/ci.sh [EXPORTS_DIR]` | Every gate in docker (`tools/verify/README.md`). Without exports: the demo households, vitest on `full` (a skip fails), the contract and route matrix on each, two more zones, the runtime images, the stack; ends `gate: pytest P passed; vitest P passed / 0 failed / 0 skipped; contract 6/6; matrix 8/8; stack P/T` and `CI OK`. With exports: eslint, tsc and the tests on them, as real (`FF_SUITE_LOG`; `FF_DEMO_EXPORTS=1` if synthetic) |
+| `tools/verify/ci.sh [EXPORTS_DIR]` | Every gate in docker (`tools/verify/README.md`): without exports, the demo households, the images and the stack, ending `gate: pytest P passed; vitest P passed / 0 failed / 0 skipped; contract 6/6; matrix 8/8; stack P/T` and `CI OK`; with exports, eslint, tsc and the tests on them, as real (`FF_SUITE_LOG`; `FF_DEMO_EXPORTS=1` if synthetic) |
 | `tools/verify/narrow.sh pytest\|vitest <paths>` | A few tests of the worktree in the images the gate last built (no network) |
 | `make clean` | `rm -rf data/` **only**; the DB rebuilds from the snapshots |
 
@@ -58,17 +57,17 @@ by writer; shared folders are used link-proof (`deploy/safe_files.py`). Don't co
   `prefs.json` and `manual_assets.json` (`/api/manual-assets`), each merged by its own rule; it checks shape, the
   engine meaning. `docs/design/data-and-sync.md`.
 - **The refresh view** (`/api/refresh`): `POST` asks for a refresh, rate-limited (15 min apart, 6 manual a local day;
-  `deploy/refresh_state.py`, `decide()` is pure). `POST {"mode": "ingest"}`, and a manual-assets save that changed the
-  document, touch the marker `ingest_wanted`: the refresher runs `refresh.sh ingest` (no fetch, no feed budget), at
-  most 48 a local day. `GET` adds `schedule` (the scheduler's `schedule.json`) and `ingest`. Only the refresher and
-  `refresh.sh` write `status.json`. `docs/design/information-architecture.md` ("The server side").
+  `deploy/refresh_state.py`, `decide()` is pure). `POST {"mode": "ingest"}`, a manual-assets save that changed the
+  document and `preflight` (no data yet, or an older release's) touch the marker `ingest_wanted`: the refresher runs
+  `refresh.sh ingest` (no fetch, no feed budget), at most 48 a local day. `GET` adds `schedule` and `ingest`. Only the
+  refresher and `refresh.sh` write `status.json`. `docs/design/information-architecture.md` ("The server side").
 
 ## Layout & where to change things
 ```
 config/   a household's own YAML, git-ignored, never in the tree or an image (compose mounts it read-only):
           household.yaml and accounts.yaml required, the rule files and presets/ optional (docs/configuration.md)
 starter/  the rule files a new household copies into its config/ (starter/README.md; tests/test_starter.py)
-examples/ minimal/: the smallest config that runs, in the FF_HOME layout (tests/test_minimal_household.py)
+examples/ minimal/: the smallest config that runs (tests/test_minimal_household.py)
 etl/      the pipeline (`python -m etl`); parsers/simplefin.py the bank feed's reader; quality/reconcile.py the checks
   importers/  registry.py (format name → parse), the native formats (chase_checking, chase_card, bofa_bank), ofx.py,
           csv_preset.py (the preset engine), presets/*.yaml (the shipped presets: docs/importing-banks.md)
@@ -88,20 +87,18 @@ ff, compose.yaml  the install's command and its four services; etl/install.py an
 deploy/   Dockerfiles, Caddyfile, auth.py + scenario_store.py (sign-in, family store), make_crontab.py, alert.py,
           the refresh (refresh.sh, refresh_runner.py, refresh_state.py), safe_files.py, export_diff.py (README.md)
 tests/    pytest on the demo household and synthetic fixtures
-tools/    verify/ (the gate and its helpers: ci, demo, demo site, export-diff, screenshots, licences, spdx, release
-          names; tools/verify/README.md), demo/ (the demo generator: six profiles, each with truth.json;
-          tools/demo/README.md), maintainer/ (post-publish and adoption-report, run by hand once a release is public)
+tools/    verify/ (the gate and its helpers), demo/ (the six-profile demo generator, each with truth.json),
+          maintainer/ (cutting a release, Dependabot, post-publish): each has its README.md
 docs/     configuration.md (every key), importing.md, security.md, architecture.md, ROADMAP.md,
-          ai-categorization.md, images/ (the README's pictures, from `full`), design/ (mechanics)
+          ai-categorization.md, images/ (the README's pictures), design/ (mechanics)
 ```
 
-**Where the ETL finds its files** (`Paths`, `etl/config.py`; its docstring has the table): a `Config` argument, else a
-variable (`FF_CONFIG_DIR`, `FF_IMPORTS_DIR`, `FF_STORE_DIR`, `FF_SECRETS_DIR`, `FF_STATE_DIR`, `FF_DATA_DIR`), else
-the `FF_HOME` tree (what compose mounts), else the developer layout (a source checkout with `config/` beside it).
+**Where the ETL finds its files** (`Paths`, `etl/config.py`, whose docstring has the table): a `Config` argument, else
+an `FF_*_DIR` variable, else the `FF_HOME` tree (what compose mounts), else the developer layout (a checkout).
 
 **Pipeline order** (`pipeline.py:run`): `parse_transactions → parse_simplefin → enrich → parse_assets →
-finalize_quality → persist_learned → persist → export`. Put new logic in the matching stage. `parse_assets` builds
-net worth's one series map (`networth.build_series`: the balances plus the manual assets).
+finalize_quality → persist_learned → persist → export`. Put new logic in the matching stage (`parse_assets` builds
+net worth's series map, `networth.build_series`).
 
 ## Recipes
 - **New transaction source:** a preset first (`import map` or a YAML file: a household's own in `config/presets/`, a
@@ -112,14 +109,14 @@ net worth's one series map (`networth.build_series`: the balances plus the manua
   which `etl/networth.py` turns into that account's series; every row decision (class, liquidity, carry, the margin
   breakdown) lives there. A value with no feed is a manual asset.
 - **Surface new ETL data in the app:** `etl/exports.py` → `app/src/data/types.ts` and `schemas.ts` (two independent
-  descriptions, same commit) → `DataContext.loadAppData` → the section; the app never queries the DB. Every shape
-  change, a widened type included, bumps `SCHEMA_VERSION` and `EXPECTED_SCHEMA_VERSION` (`contract.test.ts` pins them);
-  an older export can reach a newer bundle, so every new key gets a default (`docs/design/data-and-sync.md`).
+  descriptions, same commit) → `DataContext.loadAppData` → the section; the app never queries the DB. A widened type
+  is a shape change too (`contract.test.ts` pins the versions); an older export can reach a newer bundle, so every new
+  key gets a default (`docs/design/data-and-sync.md`).
 - **A new config key:** its check and its row in `validate.py` `KEYS` and in `docs/configuration.md`
   (`tests/test_validate.py`). A default the export needs lives in one table the document and the starter file state
   too (`PROJECTION_DEFAULTS`, `tests/test_minimal_household.py`).
-- **Categorization/vendor fixes:** edit `config/*.yaml`, run `python -m etl validate` (`ingest` refuses the
-  config until it passes), dry-run with `rules preview`, check with `rules overlaps`, re-ingest. The P2P
+- **Categorization/vendor fixes:** edit `config/*.yaml`, `python -m etl validate`, dry-run with `rules preview`,
+  check with `rules overlaps`, re-ingest. The P2P
   catch-all stays last in its stage; family-only facts go in `config/overrides.yaml` (highest precedence). Day to day
   the family answers rows in the Review inbox (`/review` → `state/family/answers.json` → the next ingest; never `type`).
   Precedence, rule shapes, learned rules: `docs/design/categorization-and-learned-rules.md`.
@@ -130,7 +127,7 @@ net worth's one series map (`networth.build_series`: the balances plus the manua
   of stored data; chains and cycles are refused at load. `docs/design/renames.md`.
 - **In-app preferences:** budgets, the target mix and targets, projection defaults, payroll facts, saved views and
   reports and the module switches are the app's (`state/family/prefs.json`, merged over `assumptions.json` in
-  `app/src/lib/prefs.ts`; the config stays the seed; no ingest). A manual-asset save asks for an ingest itself.
+  `app/src/lib/prefs.ts`; the config stays the seed; no ingest).
 - **Documents:** a link, an anchor, a `./ff` command or the heading a page quotes is checked
   (`tests/test_documents.py`); a README picture is a `tools/verify/screenshots.sh` shot of `full`, at most 1 MiB with
   image chunks only (`tests/test_doc_images.py`). A user document never names a test-only variable.
@@ -153,8 +150,8 @@ net worth's one series map (`networth.build_series`: the balances plus the manua
   counts checking, savings, brokerage and loan accounts, credit cards when `household.yaml`
   `net_worth.include_credit_cards` (default true), and the manual assets. A row is an account's last balance by the
   date: an account that stopped reporting is carried (a feed account warns, `simplefin.stale.<id>`); one not yet
-  observed is in the snapshot's `missing`, never guessed (the dashboard's history keeps comparable month ends only:
-  `app/AGENTS.md`). A loan is stored negative whatever sign the feed uses; a debt is never liquid.
+  observed is in the snapshot's `missing`, never guessed. A loan is stored negative whatever sign the feed uses; a
+  debt is never liquid.
 - **Manual assets** (`etl/manual_assets.py`): net worth counts the store document's live assets plus every
   `manual_entries` item whose id (`networth.manual_slug` of its name) no live app asset takes: an app asset of that id
   overrides the entry, removing it brings the entry back, and the app never hides one. One the household could not
@@ -193,10 +190,9 @@ net worth's one series map (`networth.build_series`: the balances plus the manua
   seeds and net-worth options; `Config.owners` = adults, joint label, children; every `owner` is one of them and an
   `earner` a member, both checked at load. `accounts.yaml`: the accounts (`Config.asset_class_of`,
   `Config.mortgage_account_id()`, `Config.loan_terms(id)`) and the manual entries. `assumptions.yaml`: tunables.
-- The exports also say what is configured (`manifest.setup`, for the first-run page), who the household is
-  (`assumptions.household` `name`, `timezone`), the module seeds (`assumptions.modules`), which projection defaults are
-  stated (`projections_stated`), the asset classes (`asset_classes`) and the manual assets (`accounts.json`
-  `manual_assets` and `manual_overridden`; snapshot rows' `manual_id`, `carried_back`).
+- The exports also carry the setup (`manifest.setup`, for the first-run page) and, in `assumptions`, `household`
+  (`name`, `timezone`), `modules`, `projections_stated` and `asset_classes`; manual assets are `accounts.json`
+  `manual_assets` / `manual_overridden` and snapshot rows' `manual_id`, `carried_back`.
 - Every balance carries an `as_of` date. **Rates with no data are `null`, never 0** (a margin APR the config does not
   state too); don't `?? 0` a rate before formatting.
 - Type-set constants (`TXN_TYPES`, `SPEND_TYPES`, `ASSET_CLASSES`, `LIABILITY_CLASSES`, `ACCOUNT_KINDS`,
@@ -233,7 +229,7 @@ net worth's one series map (`networth.build_series`: the balances plus the manua
 | the refresh and the ingest without a fetch | `docs/design/information-architecture.md` |
 | compose, `ff`, the sign-in, Caddy, the schedule, alerts, backup, upgrade | `docs/design/platform.md` |
 | the images, the workflows (CI, release, the demo site), `tools/verify`, test fixtures and guards | `docs/design/deploy-and-gates.md` |
-| the maintainer's post-publish and adoption scripts | `tools/maintainer/README.md` |
+| cutting a release, Dependabot, the post-publish and adoption scripts | `tools/maintainer/README.md` |
 | anything under `app/` | `app/AGENTS.md` and its index |
 | the AI step (`etl/ai/`, `ai_status.json`) | `docs/design/ai.md` |
 | the full list | `docs/design/README.md` |

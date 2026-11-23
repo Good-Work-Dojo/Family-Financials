@@ -40,15 +40,23 @@ export function fmtUSDExact(v: number): string {
 /** `v` in whole dollars as fmtUSD0 rounds it (half a dollar away from zero; never −0): a total of rows printed in whole
  *  dollars adds these, so it is the sum of the figures shown */
 export const wholeDollars = (v: number): number => Math.sign(v) * Math.round(Math.abs(v)) || 0;
-/** $1.2M / $450K style for axes and dense cards */
+/** $1.2M / $450K style for axes and dense cards. Each unit is chosen by the value as that unit prints it, so a value that
+ *  rounds up to the next unit is written in it: $1.00M, never $1000K; $1.0K, never $1000. */
 export function fmtCompact(v: number): string {
   if (isPrivate()) return MASK;
   const a = Math.abs(v);
   const sign = v < 0 && a >= 0.5 ? MINUS : "";
-  if (a >= 1_000_000) return `${sign}$${(a / 1_000_000).toFixed(a >= 10_000_000 ? 1 : 2)}M`;
-  if (a >= 10_000) return `${sign}$${Math.round(a / 1000)}K`;
-  if (a >= 1_000) return `${sign}$${(a / 1000).toFixed(1)}K`;
-  return `${sign}$${Math.round(a)}`;
+  if (Math.round(a) < 1_000) return `${sign}$${Math.round(a)}`;
+  const k = a / 1000;
+  if (Number(k.toFixed(1)) < 10) return `${sign}$${k.toFixed(1)}K`;
+  if (Math.round(k) < 1_000) return `${sign}$${Math.round(k)}K`;
+  const m = a / 1_000_000;
+  return `${sign}$${m.toFixed(Number(m.toFixed(2)) < 10 ? 2 : 1)}M`;
+}
+/** the share a change is of its base, for a "+$3,346 (0.3%)" chip: a whole percent, and one decimal under 1% so a real
+ *  change never reads "(0%)" */
+export function fmtChangeShare(share: number): string {
+  return fmtPct(share, Math.abs(share) < 0.01 ? 1 : 0);
 }
 /** a compact signed change for a chart label: +$1.2K / −$450, a plain $0 for a change that rounds to nothing, and the mask
  *  ALONE (no sign in front of it) while privacy mode is on */

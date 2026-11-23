@@ -328,11 +328,11 @@ def test_every_service_reports_its_health_and_web_waits_for_a_healthy_store():
 
 def test_the_images_default_to_the_two_runtime_images_each_built_by_one_service_from_a_checkout():
     svcs = services()
-    assert resolve(svcs["web"]["image"]) == "ghcr.io/good-work-dojo/family-financials-web:1.0.0"
+    assert resolve(svcs["web"]["image"]) == "ghcr.io/good-work-dojo/family-financials-web:1.0.1"
     assert resolve(svcs["web"]["image"], {"FF_IMAGE_WEB": "registry.example.net/ff/web:other"}) == \
         "registry.example.net/ff/web:other"
     etl = {svcs[n]["image"] for n in ("store", *WORKERS)}
-    assert len(etl) == 1 and resolve(etl.pop()) == "ghcr.io/good-work-dojo/family-financials-etl:1.0.0"
+    assert len(etl) == 1 and resolve(etl.pop()) == "ghcr.io/good-work-dojo/family-financials-etl:1.0.1"
     assert svcs["web"]["build"] == {"context": ".", "dockerfile": "deploy/Dockerfile.web", "target": "web"}
     assert svcs["scheduler"]["build"] == {"context": ".", "dockerfile": "deploy/Dockerfile.etl", "target": "etl"}
     assert [n for n, s in svcs.items() if "build" in s] == ["web", "scheduler"]

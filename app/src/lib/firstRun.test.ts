@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Additional terms: see NOTICE
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadAppData } from "../data/DataContext";
+import { describe, expect, it, vi } from "vitest";
 import type { AppData, Setup } from "../data/types";
 import { appDataFactory, balancesOnlyData, snapFactory, transactionsOnlyData, txFactory } from "./__fixtures__";
-import { SHIPPED_RESERVED } from "./categories";
 import { FIRST_RUN_KEEPS, FIRST_RUN_TITLE, firstRunState, replacedInFirstRun } from "./firstRun";
 
 const base = appDataFactory(snapFactory())({});
@@ -77,47 +75,6 @@ describe("firstRunState", () => {
         expect(state(transactionsOnlyData())).toBeNull();
       }
     } finally { vi.useRealTimers(); }
-  });
-});
-
-// An export older than the manifest's `setup` (schema 18) is read with the setup the loader derives: the accounts
-// accounts.json lists, a feed once one was fetched, no statement file and the newest snapshot's hand-stated rows.
-describe("firstRunState on an export older than the setup key", () => {
-  afterEach(() => vi.unstubAllGlobals());
-  const manifest18 = { schema_version: 18, generated_at: "2026-10-02T10:00:00-05:00", simplefin_fetched_at: null,
-    transaction_count: 0, current_snapshot_date: null, files: [] };
-  const assumptions18 = { projections: {}, category_renames: [], reserved: SHIPPED_RESERVED,
-    net_worth: { include_credit_cards: true }, mortgage: null,
-    household: { people: [{ name: "Alex", role: "owner" }], margin_apr: null, retirement_accounts: {}, margin_account: null } };
-  const account18 = { id: "demo_checking_0000", name: "Sample Checking", institution: "Sample Bank", owner: "Alex",
-    kind: "checking", asset_class: null, txn_data_start: null, txn_data_end: null, latest_balance: null,
-    latest_balance_as_of: null, ledger_drift: null };
-  /** loads a schema-18 export set; a file `bodies` does not name is not served */
-  const load18 = (bodies: Record<string, unknown>) => {
-    const served: Record<string, unknown> = { "manifest.json": manifest18, "assumptions.json": assumptions18,
-      "transactions.json": { count: 0, transactions: [] }, "assets_timeseries.json": { snapshots: [] }, ...bodies };
-    vi.stubGlobal("fetch", async (url: string) => {
-      const name = String(url).replace(/^\.\//, "");
-      return name in served ? new Response(JSON.stringify(served[name]), { status: 200 }) : new Response("no", { status: 404 });
-    });
-    return loadAppData();
-  };
-
-  it("with data: the app", async () => {
-    const row = txFactory({ account: account18.id })();
-    const { data } = await load18({ "transactions.json": { count: 1, transactions: [row] },
-      "accounts.json": { accounts: [account18] } });
-    expect(data.manifest.setup.accounts, "the loader derived a setup").toBe(1);
-    expect(firstRunState(data.manifest, data)).toBeNull();
-  });
-
-  it("with no data: waiting when accounts.json lists an account, set up when it lists none", async () => {
-    const listed = (await load18({ "accounts.json": { accounts: [account18] } })).data;
-    expect(listed.manifest.setup).toEqual({ accounts: 1, feed: false, import_files: 0, manual_assets: 0 });
-    expect(firstRunState(listed.manifest, listed)).toBe("waiting");
-    const none = (await load18({ "accounts.json": { accounts: [] } })).data;
-    expect(none.manifest.setup).toEqual(NOTHING);
-    expect(firstRunState(none.manifest, none)).toBe("setup");
   });
 });
 

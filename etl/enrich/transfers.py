@@ -388,13 +388,15 @@ class TransferEngine:
                  bank_account_ids: set[str],
                  account_kinds: dict[str, str] | None = None,
                  household: dict | None = None,
-                 split_vendors: Iterable[str] = ()):
+                 split_vendors: Iterable[str] = (),
+                 account_names: dict[str, str] | None = None):
         """`rules` is compile_transfer_rules' output for `transfer_rules`, whose `groups:`, `outside:`,
         `venmo_patterns:` and `generic_matching` the engine reads as they were checked at load. `bank_account_ids` are
         the bank and card accounts (the P2P tests and `bank_any`), `account_kinds` maps each registry id to its kind
         (kind-scoped rules, `kind:` hints and the generic phase; without it no account has a kind), `household`
-        carries `own_name_tokens`, and `split_vendors` names the casefolded vendors a split rule splits
-        (Config.split_rules' keys), whose rows the generic phase leaves alone."""
+        carries `own_name_tokens`, `split_vendors` names the casefolded vendors a split rule splits
+        (Config.split_rules' keys), whose rows the generic phase leaves alone, and `account_names` maps a registry
+        id to the name a gap question prints (an id without one is printed as it is)."""
         self.rules = list(rules)
         doc = transfer_rules or {}
         self.groups: dict[str, Group] = {
@@ -431,6 +433,7 @@ class TransferEngine:
         minimum = assumptions.get("generic_min_amount")
         self.generic_min_cents: int = round((DEFAULT_GENERIC_MIN_AMOUNT if minimum is None else minimum) * 100)
         self.split_vendors: frozenset[str] = frozenset(split_vendors)
+        self.account_names: dict[str, str] = dict(account_names or {})
 
     @classmethod
     def from_config(cls, cfg, account_windows: dict[str, tuple[str, str]],
@@ -439,7 +442,8 @@ class TransferEngine:
         assumptions, its accounts' kinds, its household and its split rules' vendors."""
         return cls(compile_transfer_rules(cfg), cfg.transfer_rules, cfg.assumptions, account_windows,
                    bank_account_ids, account_kinds={a: m["kind"] for a, m in cfg.accounts.items()},
-                   household=cfg.household, split_vendors=cfg.split_rules)
+                   household=cfg.household, split_vendors=cfg.split_rules,
+                   account_names={a: m["name"] for a, m in cfg.accounts.items()})
 
     # ---------------- Phase A ----------------
 
@@ -551,7 +555,8 @@ class TransferEngine:
             # A Zelle row may name its counterparty; only own-name rows can be internal transfers — third-party
             # Zelle is real spending/income. A row whose wording names no party stays a candidate.
             party = self.zelle_party.search(desc.upper()) if self.zelle_party is not None else None
-            if party and not any(n in party.group(1) for n in self.own_names):
+            # a token is a whole word of the party's name: an adult named Ed is not FRED SMITH
+            if party and not any(re.search(rf"\b{re.escape(n)}\b", party.group(1)) for n in self.own_names):
                 return False
             return True
         return False
@@ -723,12 +728,13 @@ class TransferEngine:
         for (account_id, hint), rows in sorted(unexpected.items()):
             total = sum(r.amount_cents for r in rows)
             dates = sorted(r.date for r in rows)
+            one = len(rows) == 1
             result.open_questions.append(OpenQuestion(
                 topic="unmatched-internal",
-                question=(f"{len(rows)} internal rows in {account_id} (counterparty "
-                          f"{hint}) have no matching row on the other side even though "
-                          f"its data covers those dates — likely the other side's "
-                          f"export omits them. They remain excluded from spending."),
+                question=(f"{len(rows)} internal row{'' if one else 's'} in {self._named(account_id)} "
+                          f"{'has' if one else 'have'} no matching row in {self._counterpart_words(hint)}, though "
+                          f"the data there covers {'its date' if one else 'their dates'}: likely that export omits "
+                          f"{'it. It stays' if one else 'them. They stay'} out of spending."),
                 context=f"{dates[0]} → {dates[-1]}, net {total / 100:,.2f}"))
         self._finalize_venmo(txns, result)
 
@@ -746,8 +752,23 @@ class TransferEngine:
         if kind is not None:
             return sorted(a for a, k in self.kinds.items() if k == kind and a != t.account_id)
         if hint == BANK_ANY:
-            return sorted(self.bank_accounts)
+            return sorted(a for a in self.bank_accounts if a != t.account_id)
         return [hint] if hint in self.account_ids else []
+
+    def _named(self, account_id: str) -> str:
+        return self.account_names.get(account_id, account_id)
+
+    def _counterpart_words(self, hint: str) -> str:
+        """Where a gap question says the other leg should be, in words: an account by its name, `bank_any` as another
+        bank account, a `kind:` hint as an account of that kind, a group by its name"""
+        if hint == BANK_ANY:
+            return "another bank account"
+        kind = self._hint_kind(hint)
+        if kind is not None:
+            return f"a {kind} account"
+        if hint in self.groups:
+            return f"the accounts of the group {hint}"
+        return self._named(hint)
 
     def _covers(self, account_id: str, date: str) -> bool:
         w = self.windows.get(account_id)

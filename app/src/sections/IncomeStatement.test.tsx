@@ -100,12 +100,14 @@ describe("Income statement: no row sums nothing", () => {
     return [...screen.getByTestId("card-pnl").querySelectorAll("tbody tr")].map((r) => r.querySelector("td")?.textContent);
   };
   const byCat = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`Cat ${i + 1}`, { total: 100 * (i + 1), by_subcategory: {} }]));
-  const withCats = (n: number, invested = 0) => holding(months("2030-01", "2030-06").map((m) => ({ ...m, by_category: byCat(n), invested })));
+  // the categories hold the month's whole spending (100 + 200 + … + 100n)
+  const withCats = (n: number, invested = 0) => holding(months("2030-01", "2030-06").map((m) => ({ ...m, by_category: byCat(n),
+    spend: 50 * n * (n + 1), invested })));
   it("nine categories and no investment account: no Other row and no Invested row", () => {
     data = withCats(9);
     const rows = rowNames();
     expect(rows).not.toContain("Other categories");
-    expect(rows).not.toContain("Invested (transfers in)");
+    expect(rows).not.toContain(INVESTED);
     expect(rows).toContain("Total spending");
   });
   it("ten categories: the tenth is in the Other row", () => {
@@ -114,11 +116,62 @@ describe("Income statement: no row sums nothing", () => {
   });
   it("an investment account: the Invested row, a true $0 included", () => {
     data = { ...withCats(3), accounts: [acctFactory()({ id: "brk", kind: "brokerage", asset_class: "Stocks/ETF" })] };
-    expect(rowNames()).toContain("Invested (transfers in)");
+    expect(rowNames()).toContain(INVESTED);
   });
   it("money moved into an investment with no such account listed: the Invested row", () => {
     data = withCats(3, 500);
-    expect(rowNames()).toContain("Invested (transfers in)");
+    expect(rowNames()).toContain(INVESTED);
+  });
+  it("six income streams or fewer: no Other income row", () => {
+    data = withStreams(6);
+    expect(rowNames()).not.toContain("Other income");
+  });
+  it("spending the listed categories do not hold (a row with no category): the Other row", () => {
+    data = holding(months("2030-01", "2030-06").map((m) => ({ ...m, by_category: byCat(2), spend: 1_000 })));
+    expect(rowNames()).toContain("Other categories");
+  });
+});
+
+/** a household whose one full month (May 2030) has `n` income streams of $1,000.40 each and two categories of $100.40 */
+const withStreams = (n: number) => {
+  const streams = Object.fromEntries(Array.from({ length: n }, (_, i) => [`Stream ${i + 1}`, 1000.4]));
+  const by_category = { "Cat A": { total: 100.4, by_subcategory: {} }, "Cat B": { total: 100.4, by_subcategory: {} } };
+  return holding(months("2030-05", "2030-06").map((m) => ({ ...m, income: 1000.4 * n, spend: 200.8, invested: 0,
+    income_by_subcategory: streams, by_category })));
+};
+const INVESTED = "moved to investment accounts";
+
+// The table adds up: every income stream it does not list is in an "Other income" row, and each total is the sum of
+// the whole-dollar figures printed above it, so a reader adding the column gets the total shown.
+describe("Income statement: the rows add up to the totals", () => {
+  const table = () => {
+    render(<MemoryRouter initialEntries={["/cash-flow/income-statement"]}><IncomeStatement /></MemoryRouter>);
+    return [...screen.getByTestId("card-pnl").querySelectorAll("tbody tr")]
+      .map((r) => [...r.querySelectorAll("td")].map((td) => td.textContent ?? ""));
+  };
+  const dollars = (s: string) => Number(s.replace(/[$,]/g, "").replace("−", "-"));
+  it("seven streams: the seventh is in Other income, and the income rows sum to Total income", () => {
+    data = withStreams(7);
+    const rows = table();
+    const names = rows.map((r) => r[0]);
+    const totalAt = names.indexOf("Total income");
+    expect(names.slice(0, totalAt)).toEqual(["Stream 1", "Stream 2", "Stream 3", "Stream 4", "Stream 5", "Stream 6", "Other income"]);
+    const incomeCells = rows.slice(0, totalAt).map((r) => dollars(r[1]));
+    expect(incomeCells.reduce((s, v) => s + v, 0)).toBe(dollars(rows[totalAt][1]));
+    expect(rows[totalAt][1]).toBe(fmtUSD0(7_000));
+  });
+  it("the spending rows sum to Total spending, and Net savings is the two totals shown", () => {
+    data = withStreams(7);
+    const rows = table();
+    const at = (name: string) => rows.find((r) => r[0] === name)![1];
+    expect(at("Cat A")).toBe(fmtUSD0(100));
+    expect(at("Total spending")).toBe(fmtUSD0(200));
+    expect(at("Net savings")).toBe(fmtUSD0(6_800));
+  });
+  it("the invested line sits under Net savings, as a part of it, not between the totals", () => {
+    data = { ...withStreams(2), accounts: [acctFactory()({ id: "brk", kind: "brokerage", asset_class: "Stocks/ETF" })] };
+    const names = table().map((r) => r[0]);
+    expect(names.indexOf(INVESTED)).toBe(names.indexOf("Net savings") + 1);
   });
 });
 

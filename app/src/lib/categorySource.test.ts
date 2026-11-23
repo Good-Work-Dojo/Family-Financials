@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { CategorySource } from "../data/types";
 import { chipInk, isSourceGroup, SOURCE_GROUPS, sourceChip, sourceGroup } from "./categorySource";
-import { luminance } from "./contrast";
+import { luminance } from "../test/contrast";
 
 // every category source the export may carry (etl/models.py CATEGORY_SOURCES, the zod enum in data/schemas.ts)
 const ALL: CategorySource[] = ["internal", "type_default", "parser", "vendor_rule", "learned", "keyword",

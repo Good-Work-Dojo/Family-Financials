@@ -4,12 +4,12 @@
 # ff: the Family Financials command. It finds the install directory (FF_HOME, default this script's directory), checks
 # Docker, Compose (COMPOSE_MIN), the user (not root), the machine (64-bit) and the directory (not /, your home
 # directory or a Windows drive), notes rootless Docker, remapped user ids and SELinux (adapting nothing), then runs
-# init, demo, validate, doctor, passcode, import, rules, ai, backup and restore as the ETL image's `python -m etl ...`
-# as you, the install at /ff (read-only for doctor and validate), with no network but init's for a bank feed and ai
-# run's for the AI service (init's answers file mounted read-only, every other file inside the install), and up,
-# down, refresh, upgrade, build, logs and ps through Docker Compose (up and upgrade run `python -m etl preflight`).
-# Usage: ./ff init [--answers FILE] [--force]   ./ff demo [--force]   ./ff up   ./ff down   ./ff doctor
-#        ./ff passcode add NAME | remove NAME | list   ./ff import detect|preview|map|banks ...   ./ff validate
+# init, demo, validate, doctor, passcode, import, rules, ai, backup, restore and simplefin as the ETL image's `python -m
+# etl ...` as you, the install at /ff (read-only for doctor, validate and simplefin), with no network but init's for a
+# bank feed and ai run's for the AI service (init's answers file mounted read-only, every other file inside the
+# install), and up, down, refresh, upgrade, build, logs and ps through Docker Compose (up and upgrade run preflight).
+# Usage: ./ff init [--answers FILE] [--force | --feed]   ./ff demo [--force]   ./ff up   ./ff down   ./ff doctor   ./ff validate
+#        ./ff passcode add NAME | remove NAME | list   ./ff import detect|preview|map|banks ...   ./ff simplefin list-accounts
 #        ./ff rules preview|overlaps|starter-diff ...   ./ff backup [--include-secrets]   ./ff restore FILE [--force]
 #        ./ff refresh   ./ff upgrade [--to TAG]   ./ff build   ./ff logs [SERVICE]   ./ff ps   ./ff ai preview|run|reset
 # Settings are .env's alone: up, upgrade and build refuse a deployment setting (FF_BIND, FF_PORT, …) set in the
@@ -18,9 +18,8 @@
 # compose --project-directory "$FF_HOME" -f "$FF_HOME/compose.yaml"`, split on spaces (a harness's own project).
 set -eu
 COMPOSE_MIN=2.20                                    # the oldest Docker Compose v2 this release runs with
-DEFAULT_ETL=ghcr.io/good-work-dojo/family-financials-etl:1.0.0 DEFAULT_WEB=ghcr.io/good-work-dojo/family-financials-web:1.0.0  # compose.yaml's defaults
-NL='
-'
+DEFAULT_ETL=ghcr.io/good-work-dojo/family-financials-etl:1.0.1 DEFAULT_WEB=ghcr.io/good-work-dojo/family-financials-web:1.0.1  # compose.yaml's defaults
+NL="$(printf '\n.')"; NL="${NL%.}"                  # a line break
 say() { printf 'ff: %s\n' "$*" >&2; }
 die() { say "$*"; exit 2; }
 usage() { sed -n '11,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -75,7 +74,7 @@ etl() {
   docker run --rm -i $tty --user "$(id -u):$(id -g)" --network "$net" -v "$FF_HOME:/ff:$mnt" \
     ${ANSWERS:+-v} ${ANSWERS:+"$ANSWERS:/run/ff-answers.yaml:ro"} -w "$WD" \
     -e FF_HOME=/ff -e FF_HOST_HOME="$FF_HOME" -e FF_IMAGE_ETL -e FF_IMAGE_WEB \
-    -e FF_HOST_ADDRESSES -e FF_HOST_LISTENERS -e FF_STACK_PS "$img" python -m etl "$@"
+    -e FF_HOST_ADDRESSES -e FF_HOST_LISTENERS -e FF_STACK_PS -e FF_DEBUG "$img" python -m etl "$@"
 }
 compose() {
   if [ -n "${FF_COMPOSE:-}" ]; then
@@ -100,17 +99,17 @@ start() {   # preflight in IMAGE, then the stack up and healthy, then where to o
   say "the dashboard is up: open $(printf '%s\n' "$OUT" | sed -n 's/^address: //p')"
 }
 
-CMD="${1:-}"
-[ "$#" -eq 0 ] || shift
+CMD="${1:-}"; [ "$#" -eq 0 ] || shift
 case "$CMD" in up | upgrade | build) for K in FF_BIND FF_PORT FF_PORT_TLS FF_UID FF_GID SITE_ADDRESS FF_HOSTNAMES TRUSTED_PROXIES; do
   if env | grep -q "^$K="; then die "$K is set in your environment, where compose would read it over .env: set it in .env instead"; fi
 done ;; esac
 case "$CMD" in
   init)
-    NET=none OFF=--offline A= F= NEXT=
+    NET=none OFF=--offline A='' F='' NEXT=''
     for arg in "$@"; do
       if [ -n "$NEXT" ]; then A="$arg" NEXT=; continue; fi
-      case "$arg" in --answers) NEXT=1 ;; --answers=*) A="${arg#*=}" ;; --force) F=--force ;; *) die "init takes --answers FILE and --force" ;; esac
+      case "$arg" in --answers) NEXT=1 ;; --answers=*) A="${arg#*=}" ;; --force) F="$F $arg" ;;
+        --feed) F="$F $arg" NET=bridge OFF= ;; *) die "init takes --answers FILE, --force and --feed" ;; esac
     done
     [ -z "$NEXT" ] || die "--answers needs the answers file"
     if [ -n "$A" ]; then
@@ -118,7 +117,7 @@ case "$CMD" in
       ANSWERS="$(cd -P -- "$(dirname -- "$A")" && pwd -P)/$(basename -- "$A")"
       case "$ANSWERS" in *:* | *,* | *"$NL"*) die "the answers file's path holds a :, a , or a line break, which Docker cannot mount: move it" ;; esac
       if grep -q '^feed:' "$A"; then NET=bridge OFF=; fi
-    elif [ -t 0 ]; then
+    elif [ -t 0 ] && [ "$NET" = none ]; then
       printf 'Connect a bank feed now (a setup token to paste, or a connection to finish)? [y/N] ' >&2
       read -r YN || YN=
       case "$YN" in [yY]*) NET=bridge OFF= ;; esac
@@ -128,6 +127,7 @@ case "$CMD" in
   demo | passcode | import | rules | backup | restore) etl "$ETL" none rw "$CMD" "$@" ;;
   ai) case "${1:-}" in run) etl "$ETL" bridge rw ai "$@" ;; preview | reset) etl "$ETL" none rw ai "$@" ;; *) die "ai takes preview, run or reset" ;; esac ;;
   validate) etl "$ETL" none ro validate "$@" ;;
+  simplefin) [ "$*" = list-accounts ] || die "simplefin takes list-accounts"; etl "$ETL" none ro simplefin "$@" ;;
   doctor) outside; etl "$ETL" none ro doctor ;;
   up) start "$ETL" || exit 1 ;;
   down) compose down ;;
@@ -145,6 +145,6 @@ case "$CMD" in
     start "$ETL" || { [ "$?" -eq 3 ] && failed up; failed validate; }
     compose exec refresher /opt/ff/deploy/refresh.sh ingest || failed ingest
     outside; etl "$ETL" none ro doctor </dev/null || failed doctor
-    etl "$ETL" none rw upgrade-plan done </dev/null ;;
+    etl "$ETL" none rw upgrade-plan 'done' </dev/null ;;
   *) usage ;;
 esac

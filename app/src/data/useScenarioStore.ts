@@ -13,7 +13,7 @@ import {
 } from "../lib/scenarioStore";
 import { clock } from "../lib/clock";
 import type { SecondHouseInputs } from "../lib/secondHouse";
-import { storeUrl, useSyncedDoc, type SaveState } from "./useSyncedDoc";
+import { storeUrl, useSyncedDoc, type SaveState, type SyncedDocOptions } from "./useSyncedDoc";
 
 export type { SaveState };
 
@@ -34,26 +34,43 @@ export interface ScenarioStoreApi {
   setDraw: (id: string, accountId: string, amount: number) => void;
 }
 
+/** How the scenarios document syncs. The store keeps it as it is sent (last write wins), so a tab left open must not
+ *  write its old copy over scenarios another device saved since: coming back to the tab re-reads the document
+ *  (`resyncOnVisible`, as the prefs store does) before an edit there can be sent, and an edit still waiting to be sent
+ *  is never read over. */
+export const SCENARIO_SYNC: SyncedDocOptions<ScenarioStore> = {
+  url: storeUrl("scenarios"),
+  localKey: LOCAL_KEY,
+  normalize: normalizeStore,
+  empty: emptyStore,
+  resyncOnVisible: true,
+};
+
+/** the remembered active scenario's id, or null where this browser's storage cannot be read (site data blocked) */
+function rememberedActive(): string | null {
+  try { return localStorage.getItem(ACTIVE_KEY); } catch { return null; }
+}
+
 export function useScenarioStore(): ScenarioStoreApi {
-  const { loading, localOnly, saveState, doc: store, commit } =
-    useSyncedDoc<ScenarioStore>({
-      url: storeUrl("scenarios"),
-      localKey: LOCAL_KEY,
-      normalize: normalizeStore,
-      empty: emptyStore,
-    });
+  const { loading, localOnly, saveState, doc: store, commit } = useSyncedDoc<ScenarioStore>(SCENARIO_SYNC);
   const [activeId, setActiveIdState] = useState<string | null>(null);
 
   // restore the remembered active scenario once the store has loaded
   useEffect(() => {
     if (loading) return;
-    const remembered = localStorage.getItem(ACTIVE_KEY);
+    const remembered = rememberedActive();
     setActiveIdState(
       store.scenarios.some((s) => s.id === remembered)
         ? remembered
         : store.scenarios[0]?.id ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
+
+  // the active scenario gone from the document (deleted on another device, read back on return): the first one left
+  useEffect(() => {
+    if (loading || activeId === null || store.scenarios.some((s) => s.id === activeId)) return;
+    setActiveIdState(store.scenarios[0]?.id ?? null);
+  }, [loading, activeId, store]);
 
   const setActiveId = useCallback((id: string) => {
     setActiveIdState(id);

@@ -19,9 +19,9 @@ import { clock } from "../lib/clock";
 import { baseGrid, CHART_GAIN, CHART_STRONG, CHART_TEXT, compactStep, moneyAxis, moneyTooltip, moneyValue, timeAxis,
   levelScale, wrapLegend } from "../lib/echarts";
 import { debtBarLabel, decompose, firstMortgageBalance, mortgageGap, snapshotOnOrBefore, waterfallLabels } from "../lib/decomposition";
-import { countOf, fmtCompact, fmtCompactDelta, fmtDate, fmtDelta, fmtPct, fmtUSD0, humanizeDates } from "../lib/format";
+import { countOf, fmtChangeShare, fmtCompact, fmtCompactDelta, fmtDate, fmtDelta, fmtPct, fmtUSD0, humanizeDates } from "../lib/format";
 import { footingNote, missingAssetAccounts, onOneFooting } from "../lib/comparableSnapshots";
-import { assetsBy, cardAccountIds, carriedBack, carriedBackLine, homeValue, LIQUID_MEANS, liquidity, netWorthDebt,
+import { assetsBy, cardAccountIds, carriedBack, changeShare, carriedBackLine, homeValue, LIQUID_MEANS, liquidity, netWorthDebt,
   monthlyNet, netWorthDebtNote, netWorthDelta, recentMonths } from "../lib/lifeSummary";
 import { milestoneCrossings } from "../lib/milestones";
 import { useRouteOpen } from "../lib/modules";
@@ -265,8 +265,8 @@ export default function Home() {
             <StatCard label="Net worth" value={fmtUSD0(current.total)}
               sub={[
                 // the change names the snapshot it is measured from: with one snapshot there is none, never a change of 0;
-                // its share only against an earlier total that is not 0
-                !rewound && (nw ? <>{fmtDelta(nw.delta)}{nw.pct === null ? "" : ` (${fmtPct(nw.pct, 0)})`} vs {fmtDate(nw.prior.snapshot_date)}{needsDagger(nw.prior, current)
+                // its share only against an earlier total above 0
+                !rewound && (nw ? <>{fmtDelta(nw.delta)}{nw.pct === null ? "" : ` (${fmtChangeShare(nw.pct)})`} vs {fmtDate(nw.prior.snapshot_date)}{needsDagger(nw.prior, current)
                   ? <span title={daggerTitle(current)}>†</span> : ""}</> : <>{NOT_ENOUGH_HISTORY} for a change</>),
                 // the home and the mortgage only where the household has them: no House row, no home clause; no mortgage
                 // account, no word on whether it is included
@@ -312,15 +312,16 @@ export default function Home() {
           <ul id="snapshot-deltas-list" className="flex flex-wrap gap-2">
             {shownChips.map((s) => {
               const d = current.total - s.total;
+              const share = changeShare(d, s.total);
               const dagger = needsDagger(s, current);
               return (
                 <li key={s.snapshot_date}
                   className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-1.5 text-xs"
                   title={dagger ? daggerTitle(current) : undefined}>
                   <span className="text-zinc-400">vs {fmtDate(s.snapshot_date)}{dagger ? "†" : ""}: </span>
-                  {/* the share only against an earlier total that is not 0 */}
+                  {/* the share only against an earlier total above 0 (changeShare) */}
                   <span className={d >= 0 ? "text-emerald-400" : "text-red-400"}>
-                    {fmtDelta(d)}{s.total === 0 ? "" : ` (${fmtPct(d / s.total, 0)})`}
+                    {fmtDelta(d)}{share === null ? "" : ` (${fmtChangeShare(share)})`}
                   </span>
                 </li>
               );
@@ -376,7 +377,7 @@ export default function Home() {
         // the toggle drives the allocation donut too, which one snapshot is enough for: it stays whenever there is one,
         // and with fewer than two the chart here draws the same line and total on either side
         right={(
-          <SegmentToggle value={groupBy} onChange={setGroupBy}
+          <SegmentToggle label="Group by" value={groupBy} onChange={setGroupBy}
             options={[
               { value: "by_class", label: "by class" },
               { value: "by_owner", label: "by owner" },
@@ -595,7 +596,7 @@ function DecompositionCard() {
 
   const title = "Where the change came from — saving vs markets";
   const toggle = (
-    <SegmentToggle value={period} onChange={setPeriod}
+    <SegmentToggle label="Period" value={period} onChange={setPeriod}
       options={[
         // the shared preset words (filters/dateRange PRESET_LABELS): 12M, YTD, All - not "1y" and "all"
         { value: "12m", label: PRESET_LABELS["12m"] },

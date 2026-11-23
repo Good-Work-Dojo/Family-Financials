@@ -37,8 +37,10 @@ Each of these is shown with words that say what it leaves out; a proper model wo
 - **More wordings of brokerage cash events**: the feed reader recognises dividends, trades, margin interest and
   cash back by their wording, and an event worded otherwise stays an ordinary row.
 - **Automatic pairing of transfers** to and from brokerage and loan accounts, which today need a transfer rule.
-- **A new bank-feed id named on the Data page** when a connection is made again (today the new id is read from the
-  feed's snapshot file).
+- **A new bank-feed id named on the Data page** when a connection is made again (today `./ff simplefin
+  list-accounts` or `./ff init --feed` finds it), the re-linked connection's first fetch kept from repeating the rows
+  the old id's snapshots already hold, and `init --feed` recognising a re-added bank while the feed still lists its
+  old connection.
 - **`import preview --account`** counting rows already stored for an account that reads several sources.
 - **Config checks** that would catch more mistakes early: a brokerage fed by the bank feed states its asset class;
   every transfer group a rule names exists and is used; a learning exclusion names a vendor the rules actually
@@ -46,8 +48,6 @@ Each of these is shown with words that say what it leaves out; a proper model wo
 
 ## The install
 
-- **An upgrade refreshes the install's `compose.yaml`** from the new release (today an install keeps the one it was
-  set up with).
 - **`./ff import` and `./ff rules` mount the install read-only** where they write nothing.
 - **Rootless Docker and remapped user ids**: the services cannot read the install's private folders there today.
 - **Tested on macOS (Docker Desktop), WSL and SELinux in enforcing mode**, none of which is tested now.
@@ -62,5 +62,5 @@ Each of these is shown with words that say what it leaves out; a proper model wo
 
 ## Before the export format is final
 
-The JSON files the rebuild writes are versioned, and the dashboard reads every older version it knows. Before the
+The JSON files the rebuild writes are versioned, and the dashboard reads the versions from the first release on, asking for a rebuild when the data is older. Before the
 format is declared stable for outside readers, keys no page reads and fields no row uses will be removed.

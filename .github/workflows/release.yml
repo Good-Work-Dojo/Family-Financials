@@ -53,7 +53,8 @@ jobs:
           ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
       # the names and tags the tag gives, the tag's commit and its commit time (which every later job builds and
-      # labels) and the notes: a tag of another form, no release for it (run by hand) or no CHANGELOG.md section for it
+      # labels) and the notes: a tag of another form or of a version other than the tree's (etl/install.py VERSION;
+      # a candidate's without its pre-release part), no release for it (run by hand) or no CHANGELOG.md section for it
       # stops the release here, before anything is built or pushed. Run by hand, whether the release is a prerelease is
       # read from the release itself. <major>.<minor> and latest go only to a release at or above the highest full
       # release published.
@@ -67,6 +68,7 @@ jobs:
           PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
           set -euo pipefail
+          python3 tools/verify/release_names.py check-version etl/install.py "$TAG"
           if [ "$EVENT" = workflow_dispatch ]; then
             PRERELEASE="$(gh release view "$TAG" --repo "$REPOSITORY" --json isPrerelease --jq .isPrerelease)"
           fi
@@ -284,13 +286,20 @@ jobs:
               args+=("$image@$d")
             done
             docker buildx imagetools create "${args[@]}"
-            docker buildx imagetools inspect "$image:$VERSION"
+            local shown index
+            shown="$(docker buildx imagetools inspect "$image:$VERSION")"
+            printf '%s\n' "$shown"
+            index="$(printf '%s\n' "$shown" | sed -n 's/^Digest: *//p' | head -n 1)"
+            [[ "$index" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "the index $image:$VERSION gave no digest" >&2; exit 1; }
+            printf '    %s:%s@%s\n' "$image" "$VERSION" "$index" >>"$RUNNER_TEMP/indexes"
           }
           join "$ETL" "Family Financials ETL" \
             "Family Financials: the offline ingest, the family store, the refresh worker and the scheduler" \
             "$ETL_AMD64" "$ETL_ARM64"
           join "$WEB" "Family Financials web" "Family Financials: the dashboard and its sign-in page, served by Caddy" \
             "$WEB_AMD64" "$WEB_ARM64"
+          # each image by its index digest, what an install pins to (FF_IMAGE_ETL=<name>:<version>@<digest> in .env)
+          { echo "## Index digests"; echo; cat "$RUNNER_TEMP/indexes"; } >>"$GITHUB_STEP_SUMMARY"
       - name: Sign out of the registry
         if: always()
         run: docker logout ghcr.io

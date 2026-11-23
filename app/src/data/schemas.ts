@@ -237,7 +237,7 @@ export const ManifestSchema = z.strictObject({
 
 export const HouseholdSchema = z.strictObject({
   name: z.string(),
-  // the ETL always writes the household's zone; null is what an export older than the key reads as
+  // the ETL always writes the household's zone; the contract keeps null, which reads as the browser's own zone
   timezone: z.string().nullable(),
   people: z.array(z.strictObject({
     name: z.string(), role: z.enum(["owner", "kid"]), birth_year: z.number().int().optional(),

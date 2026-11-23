@@ -11,8 +11,9 @@ install directory and each directory of the install's table (there, the invoking
 (.env: there, FF_UID / FF_GID the invoking user's and not 0, FF_BIND an address, FF_PORT a port from 1024, and a
 warning when the dashboard serves the network over plain HTTP); the config (the validator's own lines); the passcodes
 file (its mode and how many usable lines, never what they hold); the bank feed's credential (none is fine: the
-statement files alone; a mode others may read fails) and the age of its newest snapshot against the schedule; the
-alert and AI credentials' modes; the statement files no account reads; the dashboard's data and its age; the free
+statement files alone, unless accounts name feed ids, which warns; a mode others may read fails) and the age of its
+newest snapshot against the schedule; the alert and AI credentials' modes; the statement files no account reads; the
+dashboard's data and its age; with feed snapshots stored, the age of the newest backup (BACKUP_DAYS); the free
 space; and, from what `ff` gathered outside the container (FF_HOST_LISTENERS, FF_STACK_PS), whether the port is free
 or held by this stack and how the stack's services are. A secret's content is never read into a line."""
 from __future__ import annotations
@@ -31,7 +32,7 @@ from pathlib import Path
 
 import yaml
 
-from . import clock, install
+from . import clock, demo_cli, install
 from .config import Paths
 
 GIB = 1024 ** 3
@@ -231,7 +232,7 @@ def _schedule_gap(config_dir: Path) -> float:
     return float(max(gaps))
 
 
-def check_feed(now: dt.datetime) -> list[Finding]:
+def check_feed(now: dt.datetime, cfg=None) -> list[Finding]:
     paths = Paths()
     store = paths.store_dir({})
     cred = paths.credential_path(store)
@@ -239,6 +240,15 @@ def check_feed(now: dt.datetime) -> list[Finding]:
     if bad:
         return [bad]
     if not cred.exists():
+        named = len(set(cfg.simplefin_map().values())) if cfg is not None else 0
+        if named and demo_cli.is_demo(cfg):
+            # the demo's feed is invented: its snapshots are all there is, by design
+            return [ok("the demo household's bank feed is invented: its accounts show the snapshots it came with")]
+        if named:
+            # a restore without its secrets: the stored snapshots are read, and nothing new arrives
+            return [warn(f"{named} account{'s name' if named != 1 else ' names'} a bank feed id, but no bank feed "
+                         f"access is stored: {'they show' if named != 1 else 'it shows'} the stored snapshots only",
+                         "./ff init --feed connects the bank feed again")]
         return [ok("no bank feed is set up: the statement files alone are read")]
     if cred.stat().st_size == 0:
         return [fail("the bank feed's credential is empty (a setup that did not finish)", "./ff init connects it again")]
@@ -300,11 +310,40 @@ def check_exports(now: dt.datetime) -> list[Finding]:
     try:
         age = (now.timestamp() - manifest.stat().st_mtime) / 3600
     except FileNotFoundError:
-        return [warn("the dashboard has no data yet", "the first refresh builds it; ./ff refresh builds it now")]
+        return [warn("the dashboard has no data yet", "./ff up builds it a minute after the services start "
+                                                         "(./ff refresh, when they run already)")]
     if age > 48:
         return [warn(f"the dashboard's data was built {age / 24:.0f} days ago",
-                     "the Data page's refresh card says why; ./ff refresh builds it now")]
+                     "the Data page's refresh card says why; ./ff up, then ./ff refresh builds it now")]
     return [ok(f"the dashboard's data was built {age:.0f} hours ago")]
+
+
+BACKUP_DAYS = 30
+_STAMP = re.compile(r"ff-(\d{8}T\d{6}Z)")
+
+
+def check_backup(root: Path, now: dt.datetime) -> list[Finding]:
+    """The bank feed's snapshots are history no feed gives again: with any stored, the newest backup is at most
+    BACKUP_DAYS old (its age from the stamp in its name, else its modification time)."""
+    snaps = Paths().store_dir({}) / "snapshots"
+    if not (snaps.is_dir() and any(snaps.glob("accounts-*.json"))):
+        return []
+    ages = []
+    for path in (root / "backups").glob("ff-*.tar.gz"):
+        m = _STAMP.match(path.name)
+        try:
+            taken = (dt.datetime.strptime(m.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=dt.UTC) if m
+                     else dt.datetime.fromtimestamp(path.stat().st_mtime, dt.UTC))
+        except (ValueError, OSError):
+            continue
+        ages.append((now - taken).total_seconds() / 86400)
+    fix = "./ff backup, then copy it off this computer"
+    if not ages:
+        return [warn("the bank feed's history is not backed up", fix)]
+    newest = min(ages)
+    if newest > BACKUP_DAYS:
+        return [warn(f"the bank feed's history was last backed up {newest:.0f} days ago", fix)]
+    return [ok(f"the newest backup is {newest:.0f} days old")]
 
 
 def check_space(root: Path) -> list[Finding]:
@@ -389,10 +428,15 @@ def run(*, out: Callable[[str], None] = print, now: dt.datetime | None = None) -
     findings += env_findings
     config_findings, cfg = check_config()
     findings += config_findings
-    findings += check_passcodes() + check_feed(now) + check_other_secrets() + check_statements(cfg)
-    findings += check_exports(now) + check_space(root) + check_outside(env)
+    findings += check_passcodes() + check_feed(now, cfg) + check_other_secrets() + check_statements(cfg)
+    findings += check_exports(now) + check_backup(root, now) + check_space(root) + check_outside(env)
     for f in findings:
         out(f.line() if f.status else f.what)
     failed = sum(f.status == "FAIL" for f in findings)
-    out(f"{failed} problem{'s' if failed != 1 else ''} found" if failed else "everything checked is in order")
+    warned = sum(f.status == "warn" for f in findings)
+    warnings = f"{warned} warning{'s' if warned != 1 else ''} above"
+    if failed:
+        out(f"{failed} problem{'s' if failed != 1 else ''} found" + (f"; {warnings}" if warned else ""))
+    else:
+        out(f"no problem found; {warnings}" if warned else "everything checked is in order")
     return 1 if failed else 0

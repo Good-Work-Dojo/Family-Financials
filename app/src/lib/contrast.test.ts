@@ -9,7 +9,7 @@ import { LINE_KEY } from "../components/ui";
 import { withoutComments } from "../test/sourceText";
 import type { CategorySource } from "../data/types";
 import { sourceChip } from "./categorySource";
-import { contrastRatio, luminance, over } from "./contrast";
+import { contrastRatio, luminance, over } from "../test/contrast";
 import { CHART_GAIN, CHART_MUTED, CHART_RAMP, CHART_SURFACE, CHART_TOTAL_RATE, setChartTheme } from "./echarts";
 import { NEUTRAL_MARK } from "./tokens";
 

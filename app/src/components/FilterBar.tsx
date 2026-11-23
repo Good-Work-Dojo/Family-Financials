@@ -174,7 +174,7 @@ export default function FilterBar({ filters, update, clear, filtered, compact, c
             <MaskedNumberInput type="number" placeholder="max $" aria-label="Maximum amount" value={filters.amountMax ?? ""}
               onChange={(e) => update({ amountMax: e.target.value ? Number(e.target.value) : undefined })}
               className="w-20 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-base sm:text-xs" />
-            <SegmentToggle value={filters.direction}
+            <SegmentToggle label="Direction" value={filters.direction}
               options={[{ value: "all", label: "All" }, { value: "expense", label: "Out" }, { value: "income", label: "In" }]}
               onChange={(direction) => update({ direction })} />
           </>

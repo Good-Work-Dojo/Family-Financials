@@ -93,6 +93,25 @@ def format_parse(name: str, own: Mapping[str, Preset]) -> registry.Parse:
     return preset.parse if preset is not None else TXN_PARSERS[name]
 
 
+def read_statement(parse: registry.Parse, path: Path,
+                   account_id: str) -> tuple[tuple[list[Txn], FileStats, dict] | None, str | None, FileStats | None]:
+    """One statement file read with a format: `((txns, stats, extra), None, None)` when the format reads it, else
+    `(None, reason, stats)`: the file is not a plain file or is over the size cap (judged before it is opened), the
+    parse raises, or it has a line the format could not read and no row at all (then `stats` holds what the parse
+    counted; otherwise None)."""
+    try:
+        reason = registry.file_refusal(path)
+        if reason is None:
+            txns, stats, extra = parse(path, account_id)
+    except Exception as e:              # any error a file provokes is that file's failure, never the ingest's
+        reason = registry.refusal(e)
+    if reason is not None:
+        return None, reason, None
+    if txns or stats.rows_parsed or not stats.skip_reasons.get(registry.UNPARSEABLE_ROW):
+        return (txns, stats, extra), None, None
+    return None, registry.NO_ROWS, stats
+
+
 def assign_occurrence_seq(txns: list[Txn]) -> None:
     """uid disambiguator = nth occurrence of (date, amount, description) within
     one file — stable across exports that order rows differently, so cross-file
@@ -230,6 +249,9 @@ class Pipeline:
         # every statement file an account's glob matched, each once whichever accounts matched it (manifest.json
         # setup.import_files)
         self.import_files: set[Path] = set()
+        # each statement file with the accounts that read it, the one it is read for first
+        # (Config.statement_file_readers), set in parse_transactions
+        self._readers: dict[Path, list[str]] = {}
         self.checks: list[QualityCheck] = []
         self.questions: list[OpenQuestion] = []
         self.latest_balances: dict[str, tuple[str, int]] = {}
@@ -258,6 +280,8 @@ class Pipeline:
         # account" from "there are no snapshots at all" (fresh clone / CSV-only era),
         # which must not fire a per-account staleness warn for every mapped account
         self.simplefin_snapshot_read = False
+        # the stored answers the reader could not read (their file names): how old the data is skips them
+        self.simplefin_unreadable: set[str] = set()
         # account_id -> (as_of, balance_cents), latest SimpleFIN balance across snapshots
         # (all kinds, unlike latest_balances: the file balances plus a cash account's newer feed one)
         self.simplefin_latest_bal: dict[str, tuple[str, int]] = {}
@@ -295,8 +319,11 @@ class Pipeline:
             return seen
         cutovers = cfg.simplefin_cutovers()
         for snap in cfg.find_simplefin_snapshots():
-            txns, balances, _, _, _, raw_min = simplefin_parser.parse_snapshot(
-                snap, sfid_map, cutovers, cfg.accounts, cfg.simplefin_tz, cfg.simplefin_ignore())
+            try:
+                txns, balances, _, _, _, raw_min = simplefin_parser.parse_snapshot(
+                    snap, sfid_map, cutovers, cfg.accounts, cfg.simplefin_tz, cfg.simplefin_ignore())
+            except Exception:       # a stored answer the reader cannot read: parse_simplefin fails its check
+                continue
             seen |= {t.account_id for t in txns} | {b.account_id for b in balances} | set(raw_min)
             if wanted <= seen:
                 break
@@ -308,6 +335,9 @@ class Pipeline:
         # delivered something for that account (a transaction or a balance): until then the files are all the data
         # there is, and clipping would silently lose those rows.
         observed = self._feed_observed({a for a in cutovers if self.cfg.txn_sources(a)})
+        # a file two accounts' patterns match is read once, for the first account listed whose format reads it
+        # (Config.statement_file_readers)
+        self._readers = self.cfg.statement_file_readers()
         for account_id, meta in self.cfg.accounts.items():
             sources = self.cfg.txn_sources(account_id)
             if not sources:
@@ -478,18 +508,41 @@ class Pipeline:
         """Each of the account's sources' statement files (Config.find_sources, in source order), and the sources whose
         pattern matches no file. Every file found is one of the run's statement files (`import_files`). A file the
         patterns of two sources match is read once, as the first one's (its rows may then sit with the wrong source):
-        such files fail one check for the account, `import.matched_twice.<account>`, counted and the first few named."""
+        such files fail one check for the account, `import.matched_twice.<account>`, counted and the first few named.
+        A file read for an account listed earlier (`_readers`) is left out: when this account's format reads it too,
+        such files fail one check for this account, `import.matched_by_accounts.<account>`, counted and the first few
+        named with the account that reads each; a file this account's format refuses is left out with no check."""
         files_of: list[list[Path]] = []
         unmatched: list[Source] = []
         claimed: set[Path] = set()
         twice: set[str] = set()
+        taken: dict[str, str] = {}          # a file another account reads, by its name in the folder -> that account
         for source in sources:
             found = self.cfg.find_sources(source.glob)
             if not found:
                 unmatched.append(source)
+            for p in found:
+                readers = self._readers.get(p, [account_id])
+                if readers[0] != account_id and account_id in readers:
+                    taken[self._in_folder(p)] = readers[0]
+            found = [p for p in found if self._readers.get(p, [account_id])[0] == account_id]
             files_of.append([p for p in found if p not in claimed])
             twice.update(self._in_folder(p) for p in found if p in claimed)
             claimed.update(found)
+        if taken:
+            names = sorted(taken)
+            n = len(names)
+            shown = ", ".join(f"{f} ({self.cfg.accounts[taken[f]]['name']})" for f in names[:_UNMATCHED_NAMED])
+            more = f", and {n - _UNMATCHED_NAMED} more" if n > _UNMATCHED_NAMED else ""
+            key = "sources" if self.cfg.joins_sources(account_id) else "glob"
+            self.checks.append(QualityCheck(
+                name=f"import.matched_by_accounts.{account_id}", status="fail",
+                detail=f"{n} file{'s' if n != 1 else ''} this account's file pattern matches "
+                       f"{'are' if n != 1 else 'is'} read for another account: {shown}{more}. A statement file is "
+                       f"read for one account only, the first listed whose pattern matches it and whose format reads "
+                       f"it, so this account leaves "
+                       f"{'them' if n != 1 else 'it'} out: give each account a file pattern that matches only its own "
+                       f"files (accounts.yaml {key})."))
         if twice:
             names = sorted(twice)
             n = len(names)
@@ -520,19 +573,14 @@ class Pipeline:
         file named by its path in the statements folder (_in_folder), says what the file looked like in plain words (never the error's own text) and which format read it (the
         account's `parser:`, or with `in_sources` its source's `format:`), the stats of a file the parse did count are
         kept, and the file adds no row, no sum and no balance."""
-        try:
-            reason = registry.file_refusal(path)
-            if reason is None:
-                txns, stats, extra = parse(path, account_id)
-        except Exception as e:              # any error a file provokes is that file's failure, never the ingest's
-            reason = registry.refusal(e)
-        if reason is None:
-            stats.account = account_id
-            if txns or stats.rows_parsed or not stats.skip_reasons.get(registry.UNPARSEABLE_ROW):
-                return txns, stats, extra
-            self.file_stats.append(stats)
-            reason = registry.NO_ROWS
-        named = (f"its source names (accounts.yaml format: {fmt_name})" if in_sources
+        read, reason, counted = read_statement(parse, path, account_id)
+        if read is not None:
+            read[1].account = account_id
+            return read
+        if counted is not None:
+            counted.account = account_id
+            self.file_stats.append(counted)
+        named =(f"its source names (accounts.yaml format: {fmt_name})" if in_sources
                  else f"the account names (accounts.yaml parser: {fmt_name})")
         self.checks.append(QualityCheck(
             name=f"import.{account_id}.{self._in_folder(path)}", status="fail",
@@ -587,12 +635,25 @@ class Pipeline:
             earliest_raw: dict[str, str] = {}   # earliest unfiltered txn date per acct
             sf_min: dict[str, str] = {}
             sf_max: dict[str, str] = {}
-            n_txn = 0
+            n_txn = n_read = 0
+            newest: tuple[list[Holding], list[BalanceObs]] | None = None   # the newest snapshot read
             for snap in snaps:
-                txns, balances, holdings, stats, checks, raw_min = (
-                    simplefin_parser.parse_snapshot(snap, sfid_map, cutovers,
-                                                    cfg.accounts, cfg.simplefin_tz,
-                                                    cfg.simplefin_ignore()))
+                try:
+                    txns, balances, holdings, stats, checks, raw_min = (
+                        simplefin_parser.parse_snapshot(snap, sfid_map, cutovers,
+                                                        cfg.accounts, cfg.simplefin_tz,
+                                                        cfg.simplefin_ignore()))
+                except Exception:   # any error a stored answer provokes is that answer's failure, never the ingest's
+                    self.simplefin_unreadable.add(snap.name)
+                    self.checks.append(QualityCheck(
+                        name=f"simplefin.snapshot_unreadable.{snap.name}", status="fail",
+                        detail=f"Not read: the bank feed's stored answer {snap.name} is damaged or not laid out as the "
+                               "feed's answers are, so it adds nothing; the other stored answers are read. Remove "
+                               "that one file from the bank feed's store: the answers fetched before and after it "
+                               "overlap it, so they keep most of its days."))
+                    continue
+                n_read += 1
+                newest = (holdings, balances)
                 self.file_stats.append(stats)
                 for a, d in raw_min.items():
                     if a not in earliest_raw or d < earliest_raw[a]:
@@ -609,14 +670,15 @@ class Pipeline:
                     prev = latest_bal.get(b.account_id)
                     if prev is None or b.as_of >= prev[0]:
                         latest_bal[b.account_id] = (b.as_of, b.balance_cents)
-                if snap is snaps[-1]:   # newest snapshot = current positions
-                    self.holdings.extend(holdings)
-                    self.simplefin_holding_accounts = {h.account for h in holdings}
-                    # accounts that reported a balance in the newest snapshot are
-                    # "live this run": only a live margin account is broken into its
-                    # positions, and _simplefin_staleness_checks warns for the rest
-                    self.simplefin_live_accounts = {b.account_id for b in balances}
-                    self.simplefin_snapshot_read = True
+            if newest is not None:   # the newest snapshot read = current positions
+                holdings, balances = newest
+                self.holdings.extend(holdings)
+                self.simplefin_holding_accounts = {h.account for h in holdings}
+                # accounts that reported a balance in the newest snapshot are
+                # "live this run": only a live margin account is broken into its
+                # positions, and _simplefin_staleness_checks warns for the rest
+                self.simplefin_live_accounts = {b.account_id for b in balances}
+                self.simplefin_snapshot_read = True
             # flatten the deduped feed transactions (insertion order preserved;
             # replaced versions keep their slot) and account them
             for account_id, by_tid in sf_txns.items():
@@ -663,7 +725,7 @@ class Pipeline:
                                f"feed's earliest transaction is {first or 'not yet there'}: nothing replaces them"))
             self.checks.append(QualityCheck(
                 name="simplefin.ingested", status="info",
-                detail=f"{len(snaps)} snapshots, {n_txn} transactions, "
+                detail=f"{n_read} snapshots, {n_txn} transactions, "
                        f"{len(self.simplefin_holding_accounts)} accounts with holdings"))
         self.balance_obs = list(bal_by_key.values())
 
@@ -1044,7 +1106,7 @@ class Pipeline:
             # When the data was pulled: the newest snapshot's own stamp (UTC, with a Z, so the browser can parse it
             # anywhere). Unlike `generated_at` it does not move when an ingest re-exports the same snapshots, after a
             # failed fetch or a deploy. Always present; null when the store holds no snapshots yet.
-            simplefin_fetched_at=self._last_fetch(self.cfg.find_simplefin_snapshots()),
+            simplefin_fetched_at=self.last_fetch(self.cfg.find_simplefin_snapshots()),
             transaction_count=splits_mod.count_rows(self.txns),
             current_snapshot_date=self.current_snapshot_date,
             setup=self._setup(),
@@ -1069,12 +1131,12 @@ class Pipeline:
             return None
         return sum(r.value_cents for r in self.asset_rows if r.snapshot_date == self.current_snapshot_date)
 
-    @staticmethod
-    def _last_fetch(snapshots: list[Path]) -> str | None:
-        """Newest snapshot's own filename stamp. The list is sorted lexically,
-        which is chronological for these names — and stays so for the `-1`
-        collision suffix, since '-' (0x2D) sorts before '.' (0x2E)."""
-        return snapshot_fetched_at(snapshots[-1].name) if snapshots else None
+    def last_fetch(self, snapshots: list[Path]) -> str | None:
+        """The newest readable snapshot's own filename stamp: one parse_simplefin could not read says nothing of how
+        old the data is. The list is sorted lexically, which is chronological for these names — and stays so for the
+        `-1` collision suffix, since '-' (0x2D) sorts before '.' (0x2E)."""
+        readable = [s for s in snapshots if s.name not in self.simplefin_unreadable]
+        return snapshot_fetched_at(readable[-1].name) if readable else None
 
     def _export_ledger(self, out: Path) -> None:
         """Transactions, assets, holdings, balances, cashflow, recurring, quality."""
@@ -1228,10 +1290,12 @@ class Pipeline:
         fails = [c for c in self.checks if c.status == "fail"]
         warns = [c for c in self.checks if c.status == "warn"]
         print("\n=== Ingest summary ===")
+        # the manifest's count (splits.count_rows: a split purchase counted once, as its parts), then what the splits made
         parents = sum(1 for t in txns if t.is_parent)
         parts = sum(1 for t in txns if t.parent_id is not None)
-        split_note = f" ({parts} split parts of {parents} purchase{'s' if parents != 1 else ''})" if parents else ""
-        print(f"transactions: {len(txns)}{split_note}  |  asset rows: {len(cur)} in the current snapshot"
+        split_note = (f" ({parents} purchase{'s' if parents != 1 else ''} split into {parts} part{'s' if parts != 1 else ''})"
+                      if parents else "")
+        print(f"transactions: {splits_mod.count_rows(txns)}{split_note}  |  asset rows: {len(cur)} in the current snapshot"
               f" ({len(self.snapshot_coverage)} snapshots)  |  holdings: {len(self.holdings)}")
         if year:
             y, complete = year
@@ -1272,8 +1336,16 @@ def summary_year(txns: list[Txn]) -> tuple[str, bool] | None:
     return (max(earlier), True) if earlier else (newest, False)
 
 
+# how long an ingest waits for another one to end before it gives up (run)
+INGEST_LOCK_WAIT_S = 600.0
+
+
+class IngestBusy(RuntimeError):
+    """Another ingest held the lock past the wait: this one did not start (`python -m etl` says so in one line)."""
+
+
 @contextlib.contextmanager
-def ingest_lock(path: Path, wait_s: float = 600.0):
+def ingest_lock(path: Path, wait_s: float = INGEST_LOCK_WAIT_S):
     """Serialize the whole ingest across processes.
 
     An ingest starts from the scheduler's timed refresh, from the refresh
@@ -1303,7 +1375,7 @@ def ingest_lock(path: Path, wait_s: float = 600.0):
                 break
             except OSError:
                 if time.monotonic() >= deadline:
-                    raise RuntimeError(
+                    raise IngestBusy(
                         f"another ingest has held {path} for over {wait_s:.0f}s — "
                         "refusing to run a second one concurrently") from None
                 time.sleep(0.5)
@@ -1318,7 +1390,7 @@ def run(source_dir: str | None = None, strict: bool = False, *, cfg: Config | No
     clock.check()      # a pinned clock that is no date and time stops an in-process run before it writes anything
     if cfg is None:
         cfg = Config(source_dir=source_dir)
-    with ingest_lock(cfg.data_dir / ".ingest.lock"):
+    with ingest_lock(cfg.data_dir / ".ingest.lock", wait_s=INGEST_LOCK_WAIT_S):
         p = Pipeline(cfg)
         p.parse_transactions()
         p.parse_simplefin()

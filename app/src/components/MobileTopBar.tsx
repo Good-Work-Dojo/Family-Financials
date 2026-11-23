@@ -2,6 +2,7 @@
 // Additional terms: see NOTICE
 import type { ReactNode } from "react";
 import { usePointerWords } from "../lib/pointerWords";
+import { NAV_DRAWER_ID } from "./NavDrawer";
 
 /** The phone's top bar (below `md`; the sidebar owns these on a desktop): the menu button, the place's title, the
  *  freshness pill (a slot - it reads the data context), the privacy eye and the ⌘K search.
@@ -9,8 +10,11 @@ import { usePointerWords } from "../lib/pointerWords";
  *  Two things must not live only inside the drawer, two taps away: the Review inbox count and the privacy toggle. The
  *  count rides on the menu button as a chip (the inbox is not invisible until ☰ is opened) and the eye is a
  *  button here that says it is ON (amber, slashed) - so hiding every amount when someone walks up is one tap. */
-export default function MobileTopBar({ title, reviewCount, privacy, onTogglePrivacy, onOpenMenu, onOpenSearch, refresh, notice }: {
+export default function MobileTopBar({ title, reviewCount, privacy, menuOpen, onTogglePrivacy, onOpenMenu, onOpenSearch, refresh,
+  notice }: {
   title: string;
+  /** the drawer the menu button opens is open (components/NavDrawer.tsx): the button's `aria-expanded` */
+  menuOpen: boolean;
   /** transactions still wanting a category (the sidebar badge's number); 0 draws no chip */
   reviewCount: number;
   privacy: boolean;
@@ -28,7 +32,7 @@ export default function MobileTopBar({ title, reviewCount, privacy, onTogglePriv
     <header className="sticky top-0 z-30 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur md:hidden print:hidden">
     <div className="flex h-12 items-center gap-1 px-2">
       <div className="flex shrink-0 items-center">
-        <button onClick={onOpenMenu} aria-label="Open menu"
+        <button onClick={onOpenMenu} aria-label="Open menu" aria-expanded={menuOpen} aria-controls={NAV_DRAWER_ID}
           className="flex h-11 w-11 items-center justify-center rounded-lg text-lg text-zinc-300 hover:bg-zinc-900">☰</button>
         {reviewCount > 0 && (
           // a sibling of the button, not inside it: the button's accessible name stays "Open menu"

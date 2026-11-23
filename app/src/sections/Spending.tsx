@@ -349,7 +349,7 @@ export default function Spending() {
           title={breakdown === "treemap"
             ? `Category breakdown — ${click} a category to filter, ${click} again to zoom into its subcategories`
             : `Category breakdown — ${click} to filter`}
-          right={<SegmentToggle value={breakdown}
+          right={<SegmentToggle label="Chart type" value={breakdown}
             options={[{ value: "treemap", label: "Treemap" }, { value: "donut", label: "Donut" }]}
             onChange={setBreakdown} />}>
           {breakdownOption === null ? nothing() : (
@@ -367,7 +367,7 @@ export default function Spending() {
         {/* the title names the two periods only while there is a comparison to show */}
         <Card testId="card-period-compare" title={`${compareMode === "mom" ? "Month-over-month" : "Year-over-year"}${
           compare !== null && compare.rows.length > 0 && compare.before === null ? `: ${compare.words}` : ""}`}
-          right={<SegmentToggle value={compareMode}
+          right={<SegmentToggle label="Compare" value={compareMode}
             options={[{ value: "mom", label: "MoM" }, { value: "yoy", label: "YoY" }]}
             onChange={setCompareMode} />}>
           {compare === null || compare.rows.length === 0 ? nothing() : compare.before !== null ? (

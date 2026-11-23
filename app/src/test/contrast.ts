@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Additional terms: see NOTICE
-// Contrast arithmetic: the WCAG relative luminance a contrast ratio between two colours is computed from.
+// Test support: contrast arithmetic, the WCAG relative luminance a contrast ratio between two colours is computed from
+// (lib/contrast.test.ts holds the palette to its ratios). Nothing in the application imports it.
 
 const hex = (c: string): [number, number, number] => {
   const h = c.replace("#", "");

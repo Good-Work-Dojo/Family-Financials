@@ -194,7 +194,7 @@ function TrendsPage() {
         <Card testId="card-trend-liquidity"
           title={liqView === "share" ? "Liquidity — liquid share of assets" : "Liquidity — liquid assets"}
           right={snaps.length === 0 ? undefined : (
-            <SegmentToggle value={liqView} onChange={setLiqView}
+            <SegmentToggle label="Show as" value={liqView} onChange={setLiqView}
               options={[{ value: "share", label: "% of assets" }, { value: "dollars", label: "dollars" }]} />
           )}>
           {snaps.length === 0 ? <NoBalances short /> : <>

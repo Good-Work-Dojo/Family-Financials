@@ -98,7 +98,7 @@ describe("Home: This month so far", () => {
     expect(card().textContent).toContain("through Oct 3, 2026");
     // its basis on its own line, beside the figure: the spending pages' totals count the ingest day's rows too
     expect(screen.getByTestId("mtd-basis").textContent)
-      .toBe("spent in Oct 2026 through Oct 3, 2026, the last complete day: Oct 4, 2026 is still coming in");
+      .toBe("spent in Oct 2026 through Oct 3, 2026, the last complete day (Oct 4, 2026 is still coming in)");
     expect(screen.getByTestId("mtd-spend").textContent, "the partial 4th is not counted").toBe(fmtUSD0(1234));
     expect(card().textContent, "nor the prior months' 4ths").toContain(`typical by the 3rd: ${fmtUSD0(1000)}`);
     const tx_ = [...card().querySelectorAll("a")].find((a) => /This month/.test(a.textContent ?? ""));

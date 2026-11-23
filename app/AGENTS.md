@@ -1,7 +1,6 @@
 # app/AGENTS.md — dashboard (Vite + React + TS + Tailwind v4 + ECharts)
 
-The dashboard's map. The repo-root `AGENTS.md` still applies (hard rules, honesty guards, null-never-0 rates, how ETL
-data reaches the app). Bare paths (`components/…`, `lib/…`, `App.tsx`) are relative to `app/src/`. Mechanics live in
+The dashboard's map; the repo-root `AGENTS.md` still applies. Bare paths (`components/…`, `lib/…`, `App.tsx`) are relative to `app/src/`. Mechanics live in
 `docs/design/*.md` (index at the end).
 
 ## Hard rules
@@ -88,7 +87,7 @@ data reaches the app). Bare paths (`components/…`, `lib/…`, `App.tsx`) are r
 | Per-device flags (essential toggles, theme); privacy flag | `lib/localFlagStore.ts`; `lib/privacy.ts` |
 | ECharts fragments (colour-bearing ones are functions), `encodeHTML` for tooltip text | `lib/echarts.ts` |
 | Expanders, focus traps, breakpoints | `lib/useExpanded.ts`, `lib/useFocusTrap.ts`, `lib/useMediaQuery.ts` (`useIsMobile`) |
-| Landing on a card (`?card=`: Planning, Data, Budget, Investments, Settings) | `lib/scrollTargets.ts` (`SCROLL_TARGETS`, `useScrollToCardParam`, `cardPath`) |
+| Landing on a card (`?card=`) | `lib/scrollTargets.ts` (`SCROLL_TARGETS`, `useScrollToCardParam`, `cardPath`) |
 | The build id and the "updated — reload" check | `lib/buildId.ts`, `data/useBuildCheck.ts`, `app/build/versionPlugin.ts` |
 | Test helpers (the application imports none of `test/`) | `lib/__fixtures__.ts` factories; `test/routerProbe.tsx` (`where()`); `test/` for the suites on exports |
 
@@ -119,8 +118,7 @@ data reaches the app). Bare paths (`components/…`, `lib/…`, `App.tsx`) are r
   `useSyncedDoc`); the theme, privacy mode and the essential toggles are per device (localStorage).
 - **Demo mode** (`VITE_DEMO=1`, `lib/demo.ts` `IS_DEMO`, the build `tools/verify/demo_site.sh` makes): `useSyncedDoc`
   takes the local transport (this browser's copy is the document; with none it reads the site's `family/<name>.json`
-  once, so a newer release's documents show only after the site's data is cleared, as Settings' Sign out card says);
-  no refresh, sign-in, sign-out, AI switch or build poll; the clock stands at `generated_at`; a banner. Every storage
+  once); no refresh, sign-in, sign-out, AI switch or build poll; the clock stands at `generated_at`; a banner. Every storage
   key is defined through `storageKey` (`lib/demoKeys.ts`, prefixed in the demo). The source link: `lib/product.ts`.
 - **Signed out** (`data/session.ts`): a store 401 holds the edits under one banner, an export 401 goes to `/login`;
   Sign out clears the four mirrors. A CSV text cell that starts like a formula gets a leading `'` (`lib/csv.ts`).
@@ -128,16 +126,15 @@ data reaches the app). Bare paths (`components/…`, `lib/…`, `App.tsx`) are r
   store at `MAX_ANSWERS` one-off answers (oldest evicted; vendor answers never are); a vendor-scope answer never reaches
   a split part; a parent row is not editable. `docs/design/register-and-answers.md`.
 - **Phone**: `md` (768px) is the phone↔desktop cut; below it the sidebar is a drawer behind
-  `components/MobileTopBar.tsx`; inputs are ≥16px. Check a layout change with `tools/verify/screenshots.sh` (390 and
-  1280 wide) on a demo household; a PNG of real exports is never opened. `docs/design/mobile-and-charts.md`.
+  `components/MobileTopBar.tsx`; inputs are ≥16px. Check a layout change with `tools/verify/screenshots.sh` on a
+  demo household; a PNG of real exports is never opened. `docs/design/mobile-and-charts.md`.
 - **Suites on exports**: the smoke suite runs on the demo household `full`, nothing skipped, its names from
   `truth.json` (`test/truth.ts`), `Date` frozen at the ingest instant (`test/demoClock.ts`), in UTC. The route matrix
   (`matrix.test.tsx`) mounts every route twice, privacy off then on, on every demo profile and a household's own
   exports, and checks five ways (`test/matrixChecks.ts`: `renders`, `values`, `private`, `console`, `cards`; a route
   the first-run or module-off page replaces owes that page's cards); `empty` runs three blocks (set up, waiting for
-  data, the first-run state held off). `ci.sh` prints `matrix <profile>: 99 passed …` (293 on `empty`), then 123 for
-  `full` in America/New_York and `tiny` in Pacific/Kiritimati with the clock tests. A known gap is a
-  `test/matrixGaps.ts` row. `docs/design/deploy-and-gates.md`.
+  data, the first-run state held off); `full` and `tiny` run again in two more zones with the clock tests. A known gap
+  is a `test/matrixGaps.ts` row. `docs/design/deploy-and-gates.md`.
 - **Accessibility**: overlays are dialogs (`role="dialog" aria-modal` + a label, `lib/useFocusTrap.ts`: focus moves in,
   Tab wraps, Esc closes the topmost, focus is restored); never a nested tab stop (`focusable={false}`); sortable
   headers carry `aria-sort`; the register is one tab stop (roving tabindex).

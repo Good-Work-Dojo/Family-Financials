@@ -14,6 +14,7 @@ directory, its owner and the command that hands it back. Nothing here runs as ro
 type (`shown`); without it the path is the container's own."""
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 import re
@@ -29,7 +30,7 @@ from typing import BinaryIO
 ROOT = Path(__file__).resolve().parent.parent
 # the release's version, as pyproject.toml states it (tests pin it to pyproject.toml, app/package.json, the default
 # images in compose.yaml and ff, and the images' version label)
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 ENV_FILE = ".env"
 ENV_PREVIOUS = ".env.previous"
 COMPOSE_FILE = "compose.yaml"
@@ -322,6 +323,43 @@ def ensure_compose(root: Path, *, out: Callable[[str], None] = print) -> bool:
     write_atomic(target, source.read_bytes(), 0o644)
     out(f"wrote {shown(target, root)}, which runs the four services")
     return True
+
+
+COMPOSE_PREVIOUS = "compose.yaml.previous"
+COMPOSE_NEW = "compose.yaml.new"
+# The sha256 of every compose.yaml a release has shipped: an install's file that is one of them was never changed by
+# hand, so a newer release replaces it (refresh_compose). Frozen: each release adds its own before it ships, and a test
+# fails while this release's file is missing from it.
+SHIPPED_COMPOSE = frozenset({
+    "4c2213c8135bb7fd769f40363e24f8137d72fcfb38a1528b0fd7e5a553a708ff",   # 1.0.0
+    "787232dd7581c8a42de7de18f91ea52f58c40e98686416fb1952adc71eed37d1",   # 1.0.1
+})
+
+
+def refresh_compose(root: Path, *, out: Callable[[str], None] = print) -> str:
+    """Bring the install's compose.yaml to the release's: "same" when it is already; "replaced" when it is a file a
+    release shipped (kept first as compose.yaml.previous); "new" when it was changed by hand, which is left as it is,
+    the release's written beside it as compose.yaml.new with one note. Run by preflight after every check passed, so
+    an upgrade the new release refuses leaves the old file in place."""
+    target = root / COMPOSE_FILE
+    source = ROOT / COMPOSE_FILE
+    if not source.is_file():
+        raise Refused("the release's compose.yaml is missing from this image: pull or build the image again")
+    new = source.read_bytes()
+    old = None if target.is_symlink() else target.read_bytes()
+    if old == new:
+        return "same"
+    if old is not None and hashlib.sha256(old).hexdigest() in SHIPPED_COMPOSE:
+        write_atomic(root / COMPOSE_PREVIOUS, old, 0o644)
+        write_atomic(target, new, 0o644)
+        out(f"compose.yaml is this release's now: the one before is kept as {COMPOSE_PREVIOUS}")
+        return "replaced"
+    side = root / COMPOSE_NEW
+    if side.is_symlink() or not side.is_file() or side.read_bytes() != new:
+        write_atomic(side, new, 0o644)
+    out(f"note: compose.yaml holds changes of your own, so it is kept and this release's is in {COMPOSE_NEW}: compare "
+        "the two and carry your changes over to it")
+    return "new"
 
 
 def copy_starters(config_dir: Path, starter_dir: Path, *, out: Callable[[str], None] = print) -> list[str]:

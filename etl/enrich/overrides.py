@@ -8,13 +8,30 @@ can't silently orphan these classifications.
 The matcher and set-applier are shared with enrich/answers.py (the review
 inbox's answers file) — answers are converted to the same {match, set} shape.
 
+An entry that changes a row's `type` and names no category files the row as its new type files (resync_retyped):
+Internal for an internal type, the type's default for a row that leaves the internal types or becomes income, so a
+row's type and category never disagree (spending and income read the type). An entry whose `type` is the row's own
+leaves it where it is filed.
+
 A vendor / contains / account / date match reaches the parts of a split purchase (they copy those
 fields) and repaints them — an explicit override overrides a split; a uid or amount match
 reaches the parent only, which is display-only and logged.
 """
 from __future__ import annotations
 
-from ..models import CATEGORY_SOURCES, INTERNAL_TYPES, QualityCheck, Txn
+from ..models import (
+    CATEGORY_SOURCES,
+    FALLBACK_CATEGORY,
+    FEES_CATEGORY,
+    INCOME_CATEGORY,
+    INCOME_TYPES,
+    INTERNAL_CATEGORY,
+    INTERNAL_TYPES,
+    UNCATEGORIZED_SUB,
+    QualityCheck,
+    Txn,
+)
+from .categorize import set_internal
 
 
 def matches(t: Txn, match: dict) -> bool:
@@ -66,6 +83,25 @@ def apply_set(t: Txn, target: dict, source: str) -> None:
         t.family_fact = True
 
 
+def resync_retyped(t: Txn, subcategory: str | None = None) -> None:
+    """The category of a row an override retyped without naming a category follows its new type, as the categorizer
+    files a row of that type: an internal type is Internal/<type> (`internal`); a row that left the internal types
+    while still filed Internal, or that became income while filed outside Income, takes its type's default — Income or
+    Fees & Interest (`type_default`), or the fallback's Uncategorized for a purchase (`fallback`). Otherwise the
+    category stays: a purchase may become a fee, or income a dividend, under the category it had. A `subcategory` the
+    override named is kept under the category the row is filed in, stamped `override` as apply_set stamped it."""
+    if t.type in INTERNAL_TYPES:
+        set_internal(t)
+    elif t.category == INTERNAL_CATEGORY or (t.type in INCOME_TYPES and t.category != INCOME_CATEGORY):
+        if t.type in INCOME_TYPES or t.type == "fee":
+            t.category = INCOME_CATEGORY if t.type in INCOME_TYPES else FEES_CATEGORY
+            t.subcategory, t.category_source = None, "type_default"
+        else:
+            t.category, t.subcategory, t.category_source = FALLBACK_CATEGORY, UNCATEGORIZED_SUB, "fallback"
+    if subcategory is not None:
+        t.subcategory, t.category_source = subcategory, "override"
+
+
 def apply(txns: list[Txn], entries: list[dict]) -> list[QualityCheck]:
     checks: list[QualityCheck] = []
     total = 0
@@ -84,7 +120,11 @@ def apply(txns: list[Txn], entries: list[dict]) -> list[QualityCheck]:
             if t.is_parent:
                 on_parent += 1
                 stranded += paints and t.uid not in parts_hit
+            was = t.type
             apply_set(t, target, "override")
+            # a `type` the row has already is no retype: the row stays where it is filed
+            if "type" in target and "category" not in target and t.type != was:
+                resync_retyped(t, target.get("subcategory"))
         hits = len(hit_rows)
         total += hits
         if hits == 0:

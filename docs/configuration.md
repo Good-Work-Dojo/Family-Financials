@@ -227,7 +227,11 @@ another kind takes none. Margin is never declared: it is the negative cash of a 
 the file names (`glob`, e.g. `"demo_checking_0000-*.csv"`, matched in the statements folder, so never an absolute
 path); one without the other is refused. `./ff validate` names the formats this release reads, and your own
 presets, when an account names another. Not sure which format a file is in? `./ff import detect FILE` says
-(below, "Your own file layouts").
+(below, "Your own file layouts"). A file is read for one account only: when two accounts' patterns match it, it is
+the first listed account's whose format reads it, so a broad pattern on a checking account leaves a card's export,
+which its format cannot read, to the card. When both formats read it, the other account fails a check naming the
+file (`import.matched_by_accounts`), and `./ff validate` says so in a note. Give each account a pattern that matches
+only its own files.
 
 **Statement files in more than one format.** An account's history often comes in two formats, such as CSV exports up
 to some day and OFX downloads after it, and both usually cover the weeks around the switch. The same purchase reads
@@ -562,7 +566,10 @@ Where a row goes when no rule places it but the bank labelled it, keyed by the b
 
 ## `overrides.yaml`
 
-Facts only your household knows about single transactions, applied last. The file is a list.
+Facts only your household knows about single transactions, applied last. The file is a list. To keep a row out of
+spending and income, set its `type` (e.g. `transfer`): the type decides that, and a row given an internal type and no
+category is filed under Internal. `category: Internal` alone would leave the row counted, so it is refused without an
+internal type, and on a keyword rule or a vendor pattern too.
 
 ```yaml
 - match: {vendor: Sample Cafe, date: 2030-01-15}

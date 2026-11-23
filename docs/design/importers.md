@@ -264,7 +264,12 @@ brings no row, so the cutover would drop file rows with nothing to replace them)
   balances are judged on all of its rows.
 - **Matched twice.** A file the patterns of two sources match is read once, as the first one's, and fails one check,
   `import.matched_twice.<account>` (counted, the first five named). A source whose pattern matches no file warns,
-  `source.<account>`.
+  `source.<account>`. Across accounts, a file is read for the first account in accounts.yaml whose patterns match it
+  and whose format reads it (`Config.statement_file_readers`, which reads a file with each such account's format only
+  when several match it; when none reads it, it is the first one's, whose import check then fails). Every other
+  account leaves it out; one whose format reads it too fails one check, `import.matched_by_accounts.<account>`
+  (counted, the first five named with the account that reads each), and `validate` prints a note
+  (`validate.shared_file_notes`) without refusing the config.
 - **What each source kept.** `import.sources.<account>` (`info`) gives, per source, its format, the rows it kept and
   the rows it left out. It warns when rows left out fall on days the source holding them has no file for (outside the
   first to last row date its files hold, or any day when it read none), so no source counts them; a row dated on or

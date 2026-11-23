@@ -372,8 +372,9 @@ export function SweepCard({ i }: { i: SecondHouseInputs }) {
           data: pts.map((p) => [p.downPct, Math.round(p.pi)]),
           markArea: { silent: true,
             itemStyle: { color: NEGATIVE, opacity: 0.06 },
-            label: { color: CHART_TEXT, fontSize: 9, position: "insideTop" },
-            // the band names what it is, the down payments under 20%; what a lender may then require is the caption's
+            // no label on the chart: it collides with the "yours" line and the axis, and the caption says what the band
+            // is (the down payments under 20%) and what a lender may then require
+            label: { show: false },
             data: [[{ name: "under 20% down", xAxis: 10 }, { xAxis: 20 }]] },
           ...(i.downPct >= 10 && i.downPct <= 50 ? {
             markLine: { silent: true, symbol: "none",
@@ -389,7 +390,8 @@ export function SweepCard({ i }: { i: SecondHouseInputs }) {
     <Card testId="card-down-payment-sweep" title="Down-payment sweep">
       <EChart option={option} height={240} />
       <p className="mt-1 text-[10px] text-faint">
-        More down = lower payment but more cash locked in. Bars are cash to close (right axis). {PMI_NOT_IN_PAYMENT}
+        More down = lower payment but more cash locked in. Bars are cash to close (right axis); the shaded band is under
+        20% down. {PMI_NOT_IN_PAYMENT}
       </p>
     </Card>
   );

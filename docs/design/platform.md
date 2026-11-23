@@ -290,11 +290,12 @@ with no network (except `init` for a bank feed and `ai run`, on Docker's bridge 
 
 | Command | What it does |
 |---|---|
-| `ff init [--answers FILE] [--force]` | The setup conversation (`etl/setup_cli.py`): `household.yaml` (name, people, joint label, zone, the Home buying pages, a random refresh minute), `.env` (this computer only or the home network, the port, the uid and gid), the bank feed (a setup token now or later), the statement files already in `imports/`, a passcode, the starter rule files, `compose.yaml`, then `validate`. Each step is written when answered and kept: a second run finishes where the first stopped, and only `--force` asks again for the two YAML files. The feed credential file is created 0600 before the single-use token is spent and the access URL is synced into it with Ctrl-C held, so a spent token is never lost. The container has the network only to connect a bank feed (yes to the question, or an answers file with a `feed:` block). The answers file may hold the passcode and the token: it must be 0600, outside the install, and is mounted read-only. Exit 0 valid, 1 not valid, 2 refused, 130 stopped at a prompt |
+| `ff init [--answers FILE] [--force \| --feed]` | The setup conversation (`etl/setup_cli.py`): `household.yaml` (name, people, joint label, zone, the Home buying pages, a random refresh minute), `.env` (this computer only or the home network, the port, the uid and gid), the bank feed (a setup token now or later), the statement files already in `imports/`, a passcode, the starter rule files, `compose.yaml`, then `validate`. Each step is written when answered and kept: a second run finishes where the first stopped, and only `--force` asks again for the two YAML files, keeping each as it was in `<name>.previous` (0600). `--feed` connects a bank feed to a household set up already and does nothing else: each feed account `accounts.yaml` does not name becomes one of the household's accounts no feed id names, or one whose feed ids the feed no longer lists (a bank re-linked under a new id: its old id moves to `simplefin_id_history`, and on a terminal "a new account" is then no default answer) (its `simplefin_id`, and when it has statement files a `simplefin_cutover` the day after the later of the feed's earliest transaction and the files' last row, so no row the files hold is dropped; refused, writing nothing, when a later source's `since` would fall on or after it), a new account, or is skipped; the new lines are added in place, every other line and `household.yaml` left as they are (the file as it was is `accounts.yaml.previous`). The feed credential file is created 0600 before the single-use token is spent and the access URL is synced into it with Ctrl-C held, so a spent token is never lost. The container has the network only to connect a bank feed (`--feed`, yes to the question, or an answers file with a `feed:` block). The answers file may hold the passcode and the token: it must be 0600, outside the install, and is mounted read-only. Exit 0 valid, 1 not valid, 2 refused, 130 stopped at a prompt |
 | `ff demo [--force]` | The invented Sample household (`etl/demo_cli.py`) in an empty install: generated, ingested, `.env` and `compose.yaml` written, and a passcode labelled `demo` of four random words printed once. Refuses a directory holding anything but `ff`, `compose.yaml` and `.env`; with `--force`, still never writes over `config/`, `imports/`, `store/` or `state/family/` |
-| `ff up` | `python -m etl preflight` (`etl/stack_cli.py`): makes the missing directories, copies `compose.yaml` in, checks `.env` (uid and gid the invoking user's, never 0), validates the config, refuses with no passcode, refuses plain HTTP when `FF_BIND` is a globally routable address or is `0.0.0.0` / `::` on a computer that has one (a private bind on such a computer gets a note), refuses a port another program holds. Then `compose up -d --wait` and the address to open. Exit 1 when either fails |
+| `ff up` | `python -m etl preflight` (`etl/stack_cli.py`): makes the missing directories, copies `compose.yaml` in, checks `.env` (uid and gid the invoking user's, never 0), validates the config, refuses with no passcode, refuses plain HTTP when `FF_BIND` is a globally routable address or is `0.0.0.0` / `::` on a computer that has one (a private bind on such a computer gets a note), refuses a port another program holds. Once all of that passes, an install with no exports yet, or exports of an older schema than the image's, gets the ingest marker touched, so the refresher builds the data about a minute after it starts. Then `compose up -d --wait` and the address to open. Exit 1 when either fails |
 | `ff down` | `compose down`: the services stop; every file stays |
 | `ff refresh` | One refresh in the running refresher: the bank feed when one is set up, then an ingest |
+| `ff simplefin list-accounts` | The bank feed's accounts in its newest readable snapshot, each with the account that maps it or a suggestion (no network, the install read-only) |
 | `ff validate` | Every config problem, one line each, or `config OK` (exit 1 with problems); the install mounted read-only |
 | `ff doctor` | The checks below; the install mounted read-only |
 | `ff passcode add\|remove\|list` | The passcodes (above) |
@@ -336,10 +337,15 @@ made 0700 and files written 0644 under `config/`, 0600 elsewhere, never with the
 `ff upgrade [--to TAG]`: (1) `upgrade-plan start` backs up the household's files, keeps `.env` as `.env.previous`
 and, with `--to`, moves both image settings to that tag (refused when an image is set in the environment); (2)
 `compose pull`; (3) preflight with the new image, then `compose up -d --wait`; (4) an ingest in the new refresher;
-(5) `doctor`; (6) "upgrade done". When it stops at the pull or at validation, `.env.previous` is put back and nothing
-was restarted: the stack runs the release it ran before. When it stops later (services not healthy, the first ingest
-or `doctor` failing), the new images run and it says how to go back: `cp .env.previous .env`, then `ff up`, after
-`ff restore <the backup> --force` if the new release changed the config or the stores.
+(5) `doctor`; (6) "upgrade done". Preflight, once every check has passed, brings `compose.yaml` to the new release's:
+a file whose sha256 is one a release shipped (`install.SHIPPED_COMPOSE`, which each release extends before it ships)
+is replaced and kept as `compose.yaml.previous`; one changed by hand is left as it is, the release's written beside it
+as `compose.yaml.new` with one note. When it stops at the pull or at validation, `.env.previous` is put back and
+nothing was restarted (`compose.yaml` included): the stack runs the release it ran before. When it stops later
+(services not healthy, the first ingest or `doctor` failing), the new images run and it says how to go back:
+`cp compose.yaml.previous compose.yaml` when this upgrade replaced it, `cp .env.previous .env`, then `ff up`, then
+`ff refresh` (the newer release's exports are rebuilt for the older one), after `ff restore <the backup> --force` if
+the new release changed the config or the stores.
 
 ### `doctor`
 
@@ -347,11 +353,13 @@ Read-only; one line per check, `ok`, `warn … — <the fix>` or `FAIL … — <
 (`etl/doctor_cli.py`): the user (not root); the install directory and each directory of the table (there, the
 invoking user's, its mode; a secret or a secrets folder that is a link fails); `.env` (there, uid and gid the invoking user's and not 0, `FF_BIND` an address,
 `FF_PORT` a port from 1024, a warning when the network is served over plain HTTP); the config (the validator's lines);
-the passcodes file (its mode and how many usable lines, never what they hold); the feed credential (none is fine;
-readable by others fails) and the age of the newest snapshot against the schedule; the alert and AI credentials'
-modes; statement files no account reads; the dashboard's data and its age; free space; and, from what `ff` gathers on
-the host, whether the port is free or held by this stack and how the stack's services are. A secret's content is
-never read into a line.
+the passcodes file (its mode and how many usable lines, never what they hold); the feed credential (none is fine, but
+warns when accounts name feed ids, as after a restore without the secrets; readable by others fails) and the age of
+the newest snapshot against the schedule; the alert and AI credentials' modes; statement files no account reads; the
+dashboard's data and its age; with feed snapshots stored, a warning when the newest `backups/ff-*.tar.gz` is missing
+or more than 30 days old (that history is in no feed any more); free space; and, from what `ff` gathers on the host,
+whether the port is free or held by this stack and how the stack's services are. A secret's content is never read
+into a line. The last line counts the problems and the warnings.
 
 ## The gate's checks of the platform
 

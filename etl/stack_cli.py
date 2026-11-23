@@ -10,8 +10,12 @@ when the install has none; checks the settings file (there, FF_UID and FF_GID th
 loopback when this computer has a globally routable address, unless SITE_ADDRESS is a domain; and refuses a port
 another program holds (compose would start the store and stop at web). The host's addresses and listeners come from
 `ff` (FF_HOST_ADDRESSES: what `ip -o addr` or `hostname -I` printed on the host; FF_HOST_LISTENERS and FF_STACK_PS:
-`ss`'s listeners and compose's view of the stack); when it could read no address, that check warns instead. Its last
-line, `address: <url>`, is where the dashboard answers once it has started.
+`ss`'s listeners and compose's view of the stack); when it could read no address, that check warns instead. Once every
+check has passed, the install's compose.yaml is brought to the release's (install.refresh_compose: a file a release
+shipped is replaced and kept as compose.yaml.previous, one changed by hand gets compose.yaml.new beside it), and an
+install with no data yet, or data an older release wrote, gets the ingest marker touched, so the
+refresher builds the data as soon as it runs (`./ff up` on a new install, an upgrade, a new image named in .env). Its
+last line, `address: <url>`, is where the dashboard answers once it has started.
 
 `python -m etl upgrade-plan start [--to TAG]` is the first step of an upgrade: a backup of the household's files, the
 settings kept as .env.previous, and with --to the image settings moved to that release's tag. `upgrade-plan failed
@@ -23,10 +27,12 @@ Exit 0 when ready (or done), 2 on a refusal (one line, or the validator's lines)
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from . import install
 from .install import Refused
@@ -124,8 +130,33 @@ def preflight(*, out: Callable[[str], None] = print) -> int:
         taken = [f for f in check_ports(env) if f.status == "FAIL"]
         if taken:
             raise Refused(f"{taken[0].what}: {taken[0].fix}, then ./ff up")
+    install.refresh_compose(root, out=out)
+    if data_wanted(Paths().data_dir() / "exports" / "manifest.json"):
+        ask_for_ingest(Paths().state_refresh_dir())
+        out("the dashboard's data is built about a minute after the services start")
     out(f"address: {install.address(env)}")
     return 0
+
+
+def data_wanted(manifest: Path) -> bool:
+    """Whether the exports need building before the dashboard can show them: none yet, none readable, or ones an older
+    release wrote (the dashboard reads no export older than this release's schema)."""
+    from .exports import SCHEMA_VERSION
+    try:
+        version = json.loads(manifest.read_bytes()).get("schema_version")
+    except (OSError, ValueError, AttributeError):
+        return True
+    return not isinstance(version, int) or version < SCHEMA_VERSION
+
+
+def ask_for_ingest(refresh_dir: Path) -> None:
+    """The ingest marker the store touches for "Rebuild from files", touched here: the refresher, once it runs, builds
+    the data without a fetch (deploy/refresh_state.py, beside the etl package in the image and in a checkout)."""
+    deploy = str(install.ROOT / "deploy")
+    if deploy not in sys.path:
+        sys.path.append(deploy)
+    import refresh_state
+    refresh_state.touch_ingest_marker(refresh_dir)
 
 
 # ------------------------------------------------------------------ upgrade
@@ -185,8 +216,14 @@ def upgrade_failed(stage: str, *, out: Callable[[str], None] = print) -> int:
              "ingest": "the new release's services run, but its first ingest failed",
              "doctor": "the new release runs, but doctor found problems (above)"}[stage]
     out(f"upgrade stopped: {words}. The stack now runs the new images; your files were backed up first ({newest}).")
-    out("To go back to the release before: cp .env.previous .env, then ./ff up; and if the new release changed your "
-        f"config or stores, ./ff restore {newest} --force before that ./ff up.")
+    compose = root / install.COMPOSE_PREVIOUS
+    replaced = (compose.is_file() and previous.is_file()
+                and compose.stat().st_mtime >= previous.stat().st_mtime)       # written by this upgrade's preflight
+    first = (f"cp {install.COMPOSE_PREVIOUS} {install.COMPOSE_FILE} (this upgrade replaced it) and " if replaced
+             else "")
+    out(f"To go back to the release before: {first}cp .env.previous .env, then ./ff up, then ./ff refresh (which "
+        f"rebuilds the data for that release); and if the new release changed your config or stores, ./ff restore "
+        f"{newest} --force before that ./ff up.")
     return 0
 
 

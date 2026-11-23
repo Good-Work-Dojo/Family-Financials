@@ -4,12 +4,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MobileTopBar from "./MobileTopBar";
+import { NAV_DRAWER_ID } from "./NavDrawer";
 
 afterEach(cleanup);
 
 const bar = (over: Partial<Parameters<typeof MobileTopBar>[0]> = {}) => {
   const props = {
-    title: "Spending · Transactions", reviewCount: 0, privacy: false,
+    title: "Spending · Transactions", reviewCount: 0, privacy: false, menuOpen: false,
     onTogglePrivacy: vi.fn(), onOpenMenu: vi.fn(), onOpenSearch: vi.fn(), refresh: <span>pill</span>, ...over };
   render(<MobileTopBar {...props} />);
   return props;
@@ -22,6 +23,14 @@ describe("the phone top bar carries the review count and the privacy eye", () =>
     bar();
     expect(screen.queryByTestId("topbar-review-count")).toBeNull();
     expect(screen.getByRole("button", { name: "Open menu" })).toBeDefined();
+  });
+  it("the menu button says whether the drawer it controls is open", () => {
+    bar({ menuOpen: false });
+    const button = screen.getByRole("button", { name: "Open menu", expanded: false });
+    expect(button.getAttribute("aria-controls")).toBe(NAV_DRAWER_ID);
+    cleanup();
+    bar({ menuOpen: true });
+    expect(screen.getByRole("button", { name: "Open menu", expanded: true })).toBeDefined();
   });
   it("puts the count on the menu button as a chip a screen reader can read, without renaming the button", () => {
     bar({ reviewCount: 7 });

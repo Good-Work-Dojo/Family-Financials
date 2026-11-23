@@ -7,8 +7,9 @@ of consecutive gaps fall in one band; amount mode 'fixed' (stdev/median < 2% or
 >=80% share an exact amount) or 'variable' (within +/-35% of median); wider
 spread -> not recurring (frequent store, not a subscription).
 
-Schedules: every series also carries median_gap_days, expected_dates (its next three
-occurrences, next_expected the first), grace_days per cadence, confidence (cadence-band share × 1.0 fixed /
+Schedules: every series also carries median_gap_days, expected_dates (its next EXPECTED_DATES (3)
+occurrences, a monthly series' next MONTHLY_EXPECTED_DATES (13), so the dashboard's next-12-months views read every date
+from here and step none themselves; next_expected the first), grace_days per cadence, confidence (cadence-band share × 1.0 fixed /
 0.85 variable) and schedule = promote(row): active, cadence set, amount mode fixed/variable,
 >= 4 occurrences weekly/biweekly else >= 3, confidence >= 0.7. Clock-free — status (paid, due,
 missed, data stale) is the APP's job, from these dates and the account's txn_data_end.
@@ -68,6 +69,8 @@ STABLE_DAY_SPAN = 3            # ...whose days of the month fall within three da
 ODD_PAYMENT_MIN = 4            # ...all but one of them when there are at least four...
 MOVED_DAY_PAYMENTS = 3         # ...or the last three alone, after a payment on another day
 FIRST_EXPECTED_MIN_DAYS = 15   # the first expected date is at least this many days after the last payment
+EXPECTED_DATES = 3             # the expected dates a series exports...
+MONTHLY_EXPECTED_DATES = 13    # ...and a monthly one: a date in each of the twelve months after the month in progress
 
 
 def expected_dates(last_seen: str, median_gap_days: int, n: int = 3) -> list[str]:
@@ -245,8 +248,9 @@ def detect(txns: list[Txn], data_end: str,
         typical = int(statistics.median(amounts[-6:]))
         last_seen = rows[-1].date
         rule = monthly_rule(sorted(set(dates))) if cadence == "monthly" else None
-        nexts = (expected_dates(last_seen, median_gap_days) if rule is None
-                 else monthly_dates(last_seen, rule))
+        n = MONTHLY_EXPECTED_DATES if cadence == "monthly" else EXPECTED_DATES
+        nexts = (expected_dates(last_seen, median_gap_days, n) if rule is None
+                 else monthly_dates(last_seen, rule, n))
         active = ((date.fromisoformat(data_end) - date.fromisoformat(last_seen)).days
                   <= 2 * median_gap)
         if vendor.casefold() in cancelled_vendors:

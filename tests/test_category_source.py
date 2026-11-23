@@ -224,9 +224,9 @@ def test_sources_are_a_closed_set():
 # retype) and check what the stages leave behind in combination.
 
 SYNTH_OVERRIDES = [
-    # retypes between internal types: the category (and so its provenance) must not move
+    # retypes between internal types: still Internal, its subcategory the new type, its provenance `internal`
     {"match": {"contains": "SYNTH CARD PAYMENT 0002"}, "set": {"type": "investment"}},
-    # retypes a categorized purchase to internal: ditto, the override stamps nothing
+    # retypes a categorized purchase to internal: filed Internal/transfer, `internal`, as the categorizer files one
     {"match": {"contains": "SYNTH LUNCH RETYPED"}, "set": {"type": "transfer"}},
 ]
 
@@ -297,18 +297,18 @@ def test_internal_category_always_carries_internal_provenance(tmp_path):
     assert rows["pair_out"].transfer_group_id == rows["pair_in"].transfer_group_id is not None
 
 
-def test_an_override_retype_changes_neither_category_nor_provenance(tmp_path):
+def test_an_override_retype_to_an_internal_type_files_the_row_internal_with_internal_provenance(tmp_path):
+    """An override that sets an internal type and names no category leaves type and category agreeing: the row is
+    Internal/<its new type>, stamped `internal` (the type decides it), never the category it had before"""
     plain = _enriched(tmp_path / "plain", [])
     retyped = _enriched(tmp_path / "retyped", SYNTH_OVERRIDES)
     for name, new_type in (("rule_b", "investment"), ("retyped", "transfer")):
         before, after = plain[name], retyped[name]
         assert after.type == new_type and after.is_internal, name            # the retype landed ...
         assert after.type != before.type, name
-        assert ((after.category, after.subcategory, after.category_source)   # ... and only that
-                == (before.category, before.subcategory, before.category_source)), name
+        assert (after.category, after.subcategory, after.category_source) == ("Internal", new_type, "internal"), name
         assert after.family_fact                                             # the override did touch it
-    assert retyped["rule_b"].category_source == "internal"   # an Internal row stays "internal", not "override"
-    assert retyped["retyped"].category != "Internal"          # a retype does not relabel the category
+    assert plain["retyped"].category != "Internal"                           # it was filed elsewhere before
 
 
 def test_category_source_is_always_a_known_value_after_enrich(tmp_path):

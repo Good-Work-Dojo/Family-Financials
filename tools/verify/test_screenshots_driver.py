@@ -464,8 +464,13 @@ def test_the_button_the_driver_clicks_is_the_one_that_opens_the_apps_drawer():
     assert re.search(r'<button onClick=\{onOpenMenu\} aria-label="' + re.escape(driver.DRAWER_BUTTON) + '"', bar)
     app = (ROOT / "app" / "src" / "App.tsx").read_text("utf-8")
     assert "onOpenMenu={() => setNavOpen(true)}" in app
-    # the drawer is the app's one <aside>, and the open check reads where it sits on screen
-    assert app.count("<aside") == 1 and "aside" in driver.DRAWER_OPEN
+    # the drawer is the app's one <aside> (components/NavDrawer.tsx, which App renders once), and the open check reads
+    # where it sits on screen
+    src = ROOT / "app" / "src"
+    asides = {str(p.relative_to(src)): p.read_text("utf-8").count("<aside") for p in src.rglob("*.tsx")
+              if not p.name.endswith(".test.tsx")}
+    assert {k: v for k, v in asides.items() if v} == {"components/NavDrawer.tsx": 1}
+    assert app.count("<NavDrawer") == 1 and "aside" in driver.DRAWER_OPEN
 
 
 @pytest.mark.parametrize("viewports,phones", [

@@ -34,6 +34,25 @@ def test_chase_checking_multiline_quoted_row(tmp_path):
     assert extra["latest_balance"] == ("2030-01-08", 180000)
 
 
+def test_a_chase_checking_row_whose_balance_is_unreadable_is_read_without_its_balance(tmp_path):
+    """The Balance cell is no part of a row's identity: a row whose cell holds no amount is stored with the same uid
+    it has when the cell is readable, and the file's latest balance comes from the other rows."""
+    header = "Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #\n"
+    rows = ("DEBIT,03/14/2030,SAMPLE GROCER,-22.75,MISC_DEBIT,{balance},,\n"
+            "CREDIT,03/08/2030,SAMPLE PAYROLL,1800.00,ACH_CREDIT,1800.00,,\n")
+    unreadable = write(tmp_path, "unreadable.csv", header + rows.format(balance="n.a."))
+    readable = write(tmp_path, "readable.csv", header + rows.format(balance="1777.25"))
+    txns, stats, extra = chase_checking.parse(unreadable, "demo_checking_0000")
+    assert stats.rows_parsed == 2 and not stats.skip_reasons
+    assert extra["latest_balance"] == ("2030-03-08", 180000)
+    same, _, _ = chase_checking.parse(readable, "demo_checking_0000")
+    for t in (*txns, *same):
+        t.source_file = "statement.csv"
+    pipeline.assign_occurrence_seq(txns)
+    pipeline.assign_occurrence_seq(same)
+    assert [t.uid for t in txns] == [t.uid for t in same]
+
+
 def test_chase_card_repeated_header_and_types(tmp_path):
     p = write(tmp_path, "card.csv", """\
         Transaction Date,Post Date,Description,Category,Type,Amount,Memo

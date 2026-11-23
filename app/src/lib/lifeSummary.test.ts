@@ -12,7 +12,7 @@ import { categoryVocab } from "./categories";
 import { fmtPct, fmtUSD0 } from "./format";
 import { HAVE_EXPORTS, readExport, requireExports } from "../test/exports";
 import {
-  assetsBy, balanceHistory, balanceSheet, belowRateFloor, cardAccountIds, carriedBack, carriedBackLine, cashRunway, dailyInterest,
+  assetsBy, balanceHistory, balanceSheet, belowRateFloor, cardAccountIds, changeShare,carriedBack, carriedBackLine, cashRunway, dailyInterest,
   debtLineLabel, debtClassesOwed, debtOverview, fmtLoanToValue, homeValue, homeValueSlider, incomeStreams, liquidCash, liquidCashRows,
   liquidity, loanToValue, marginBreakdown, missingLoanTerms, monthlyBurn, monthlyNet, mortgageBalance, netWorthDebt, netWorthDebtNote,
   mortgageSummary, nearestSnapshot, lastFullYear, netWorthDelta, plWindow, pnl, primaryHomeMonthly, printableRate, RATE_FLOOR,
@@ -58,6 +58,14 @@ describe("nearestSnapshot / netWorthDelta", () => {
   it("a prior total of 0 gives the change but no percentage (nothing to divide by)", () => {
     const d = netWorthDelta([snap({ snapshot_date: "2025-06-01", total: 0 }), snap({ snapshot_date: "2026-06-01", total: 5_000 })]);
     expect([d?.delta, d?.pct]).toEqual([5_000, null]);
+  });
+  // a share of a negative base flips its sign: −$50,000 to −$25,000 is a gain, never "(−50%)"
+  it("a prior total below 0 gives the change but no percentage", () => {
+    const d = netWorthDelta([snap({ snapshot_date: "2025-06-01", total: -50_000 }), snap({ snapshot_date: "2026-06-01", total: -25_000 })]);
+    expect([d?.delta, d?.pct]).toEqual([25_000, null]);
+    expect(changeShare(25_000, -50_000)).toBeNull();
+    expect(changeShare(25_000, 0)).toBeNull();
+    expect(changeShare(25_000, 100_000)).toBe(0.25);
   });
 });
 
@@ -912,6 +920,25 @@ describe("pnl / sankeyFlows", () => {
     expect(into.reduce((x, l) => x + l.value, 0)).toBe(total);
     // ten or fewer streams: no Other income node
     expect(sankeyFlows(pnl(cashflow, "2025-01", "2025-02")).nodes.some((n) => n.name === "Other income")).toBe(false);
+  });
+  // ECharts' sankey refuses a graph with a cycle (it throws, and the page goes to its error boundary): a stream named
+  // like a category, or a category named like the household or one of the graph's own words, is a node of its own
+  it("a name shared by a stream, a category, the household and the graph's own words is never one node", () => {
+    const p = pnl([cfm({ month: "2025-01", income: 10_000, spend: 6_000, invested: 1_000,
+      income_by_subcategory: { Gifts: 4_000, Household: 1_000, Invested: 500, "Other spending": 500, Salary: 4_000 },
+      by_category: { Gifts: { total: 3_000, by_subcategory: {} }, Household: { total: 2_000, by_subcategory: {} },
+        "Saved (cash)": { total: 1_000, by_subcategory: {} } } })], "2025-01", "2025-01");
+    const s = sankeyFlows(p);
+    const names = s.nodes.map((n) => n.name);
+    expect(new Set(names).size, names.join(", ")).toBe(names.length);
+    for (const l of s.links) expect(l.source === l.target, `${l.source} → ${l.target}`).toBe(false);
+    // the graph's middle is one node every stream flows into and every outflow leaves: no node is on both sides of it
+    const into = new Set(s.links.filter((l) => l.target === "Household").map((l) => l.source));
+    const outOf = new Set(s.links.filter((l) => l.source === "Household").map((l) => l.target));
+    expect([...into].filter((n) => outOf.has(n))).toEqual([]);
+    expect(s.links.every((l) => l.source === "Household" || l.target === "Household")).toBe(true);
+    expect([...into].sort()).toEqual(["Gifts (income)", "Household (income)", "Invested (income)", "Other spending", "Salary"]);
+    expect([...outOf].sort()).toEqual(["Gifts", "Household (spending)", "Invested", "Saved (cash)", "Saved (cash) (spending)"]);
   });
 });
 

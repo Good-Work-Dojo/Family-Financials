@@ -24,7 +24,7 @@ FIELDS = (("type", "type"), ("category", "category"), ("subcategory", "subcatego
           ("source", "category_source"), ("vendor", "vendor"), ("needs_review", "needs_review"),
           ("internal", "is_internal"), ("earner", "earner"), ("is_parent", "is_parent"), ("parent", "parent_id"))
 CLIPPED = re.compile(r"^(\d+) file rows on/after cutover (\S+) dropped")
-GAP = re.compile(r"^(\d+) internal rows in (\S+) \(counterparty (\S+)\) have no matching row")
+GAP = re.compile(r"^(\d+) internal rows? in (.+?) (?:has|have) no matching row in (.+?), though the data there covers")
 GAP_NET = re.compile(r", net (-?[\d,]+\.\d{2})$")
 APPLIED = re.compile(r"^(\d+) transactions adjusted by (\d+) review-inbox answers")
 CONFLICTS = re.compile(r"review answers: (.*); remove the override if the answer should win")
@@ -200,8 +200,10 @@ def pairs(exports: Path, truth: dict) -> list[str]:
 
 
 def open_questions(exports: Path, truth: dict) -> list[str]:
-    """The questions' topics, and each gap in the data as (account, hint, rows, net cents)."""
+    """The questions' topics, and each gap in the data as (account, hint, rows, net cents): the question names the
+    accounts by their names, read back to their ids through accounts.json."""
     doc = load(exports, "open_questions.json")
+    ids = {a["name"]: a["id"] for a in load(exports, "accounts.json")["accounts"]}
     out = _both_ways("open_questions", [q["topic"] for q in doc["questions"]], figures(truth, "open_questions", []))
     gaps = []
     for g in doc["data_gaps"]:
@@ -209,7 +211,8 @@ def open_questions(exports: Path, truth: dict) -> list[str]:
         if not (head and net):
             out.append(f"open_questions: a data gap reads otherwise: {g['question']!r} {g['context']!r}")
             continue
-        gaps.append((head[2], head[3], int(head[1]), round(float(net[1].replace(",", "")) * 100)))
+        gaps.append((ids.get(head[2], head[2]), ids.get(head[3], head[3]), int(head[1]),
+                     round(float(net[1].replace(",", "")) * 100)))
     return out + _both_ways("open_questions: data_gaps", gaps, [(g["account"], g["hint"], g["rows"], g["net_cents"])
                                                                 for g in figures(truth, "data_gaps", [])])
 

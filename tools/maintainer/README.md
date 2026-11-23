@@ -65,6 +65,39 @@ tools/maintainer/post-publish.sh --denylist /path/to/denylist --expect-sha <the 
 
 Exit 0 when everything is done, 1 when a step failed, 2 on a usage error.
 
+## Cutting a release
+
+A release is a tag on `main` whose version the tree already states; `release.yml`'s `prepare` refuses any other
+(`release_names.py check-version`: `v1.2.3` and `v1.2.3-rc.1` both need the tree at `1.2.3`). In order:
+
+1. On a branch, move the version everywhere the gate pins it: `VERSION` in `etl/install.py`, `pyproject.toml` and its
+   entry in `uv.lock`, `app/package.json` and `app/package-lock.json` (both places), the two default images in
+   `compose.yaml` and in `ff` (`DEFAULT_ETL`, `DEFAULT_WEB`), and the README's download links and image names
+   (`tests/test_ff_install.py`, `tests/test_documents.py` say which line is behind).
+2. `compose.yaml` changed with its default images, so add its new sha256 (`sha256sum compose.yaml`) to
+   `SHIPPED_COMPOSE` in `etl/install.py`, never removing an older one: an upgrade replaces an install's file only when
+   it is one a release shipped.
+3. Add `## [X.Y.Z]` to `CHANGELOG.md` (no date in the heading), its notes in plain words: they are the release's notes.
+4. Open the pull request, let CI pass, merge.
+5. Straight away, publish the release at the merge commit: `python3 tools/verify/release_names.py notes CHANGELOG.md
+   vX.Y.Z > notes.md`, then `gh release create vX.Y.Z --target main --title "Family Financials vX.Y.Z" --notes-file
+   notes.md` (add `--prerelease` for a candidate). Until `release.yml` has finished, the README on `main` fetches an
+   `ff` whose default images are not published yet, so leave no gap.
+6. When the run is green, its summary holds the notes and each image's index digest (what an install pins to).
+
+## Dependabot pull requests
+
+Dependabot opens pull requests for the npm and uv packages, the GitHub Actions and the Dockerfiles' base images. A
+bump of anything the images ship fails the gate until three things are done on its branch:
+
+- **Licences.** `THIRD_PARTY_NOTICES.md`, `THIRD_PARTY_LICENSES` and `deploy/licences/` name exact versions, so run
+  `python3 tools/verify/licences.py --write` on your machine (it needs the network) and push what it changes to the
+  bot's branch.
+- **Base images.** A Dockerfile `FROM` whose digest moved needs its row in `deploy/BASES.md` moved with it (the digest
+  and the day it was read); `tests/test_bases.py` fails until it is.
+- **The contributor agreement.** CLA Assistant asks every author to sign, so add `dependabot[bot]` to its allowlist
+  once (CLA Assistant's settings for the repository), or each of its pull requests waits on a signature.
+
 ## adoption-report.sh
 
 How the project is being taken up, read from GitHub alone (the app and the demo site carry no analytics): stars,

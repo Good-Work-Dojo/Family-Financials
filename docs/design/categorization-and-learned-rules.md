@@ -37,10 +37,16 @@ category or subcategory, so a retype-only or tags-only set keeps the row's prove
   cleaned descriptor OR the raw one. The P2P catch-all stays last in `default` (the load refuses a rule after it in
   its stage: `rules.last_in_stage_problems`); a `pre` rule outranks it.
 - `config/overrides.yaml`: per-transaction family facts. An override that stops matching warns
-  (`overrides.entry_<i>`) instead of disappearing.
+  (`overrides.entry_<i>`) instead of disappearing. One that changes a row's `type` and names no category files the
+  row as its new type does (`overrides.resync_retyped`): Internal/<type> (`internal`) for an internal type; the type's
+  default for a row that leaves the internal types or becomes income (Income or Fees & Interest, `type_default`; the
+  fallback's Uncategorized for a purchase, `fallback`), so type and category never disagree. A `type` the row has
+  already (an override naming an income row's `earner`, say) leaves it where it is filed.
 - Load-time validation (`Config._validate_rules`, the checks in `etl/validate.py`) refuses the ingest on an unknown
   key, a bad field / op / stage / category, a `type` that is no transaction type, an unknown `owner` or account id, a
-  `stage:` / `name:` on a vendor pattern, or a `split:` on a keyword rule, every bad entry reported at once.
+  `stage:` / `name:` on a vendor pattern, or a `split:` on a keyword rule, every bad entry reported at once. The
+  Internal category is refused on a keyword rule and a vendor pattern (a rule sets no type, so the row would still
+  count) and on an override whose `type` is not internal: the type takes a row out of spending and income.
 
 **Vendor rules outrank the bank's label**, so an over-broad merchant pattern silently overrides answers that were
 right and can strip `needs_review` off a P2P row the catch-all would have queued. Anchor short or common-word patterns

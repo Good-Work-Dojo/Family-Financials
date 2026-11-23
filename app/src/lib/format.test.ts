@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { countOf, fmtCompact, fmtCompactDelta, fmtDate, fmtDelta, fmtMonth, fmtMonthAxis, fmtMonths, fmtPct, fmtPoints, fmtRate, fmtUSD, fmtUSD0, fmtUSDExact, hoursSince, humanizeDates, rateTone } from "./format";
+import { countOf, fmtChangeShare, fmtCompact, fmtCompactDelta,fmtDate, fmtDelta, fmtMonth, fmtMonthAxis, fmtMonths, fmtPct, fmtPoints, fmtRate, fmtUSD, fmtUSD0, fmtUSDExact, hoursSince, humanizeDates, rateTone } from "./format";
 import { MASK, setPrivate } from "./privacy";
 
 describe("rateTone", () => {
@@ -26,6 +26,27 @@ describe("the money formatters", () => {
     expect(fmtCompact(1_500)).toBe("$1.5K");
     expect(fmtCompact(450)).toBe("$450");
     expect(fmtDelta(1234)).toBe("+$1,234");
+  });
+  // the unit is chosen by the value as it prints, so a value that rounds up to the next unit is written in that unit
+  it("fmtCompact picks its unit after rounding: never $1000K, $1000 or $10.00M", () => {
+    expect(fmtCompact(999_600)).toBe("$1.00M");
+    expect(fmtCompact(-999_600)).toBe("−$1.00M");
+    expect(fmtCompact(999_499)).toBe("$999K");
+    expect(fmtCompact(999.6)).toBe("$1.0K");
+    expect(fmtCompact(999.4)).toBe("$999");
+    expect(fmtCompact(9_960)).toBe("$10K");
+    expect(fmtCompact(9_940)).toBe("$9.9K");
+    expect(fmtCompact(9_996_000)).toBe("$10.0M");
+    expect(fmtCompact(9_990_000)).toBe("$9.99M");
+    expect(fmtCompact(10_000_000)).toBe("$10.0M");
+  });
+  // the share a change is of its base: a whole percent, and one decimal under 1% so a real change never reads "(0%)"
+  it("fmtChangeShare prints a whole percent, one decimal under 1%, and the U+2212 minus", () => {
+    expect(fmtChangeShare(0.25)).toBe("25%");
+    expect(fmtChangeShare(0.003346)).toBe("0.3%");
+    expect(fmtChangeShare(-0.004)).toBe("−0.4%");
+    expect(fmtChangeShare(0.0099)).toBe("1.0%");
+    expect(fmtChangeShare(-0.1)).toBe("−10%");
   });
   // one minus for every money formatter (U+2212, the typographic one fmtDelta always used), so a negative amount
   // reads the same in a KPI, an axis, a delta and a register row

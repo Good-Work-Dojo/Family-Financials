@@ -17,7 +17,7 @@
   python -m etl import map FILE --id NAME [--answers FILE] [--force] (offline; writes config/presets/NAME.yaml)
   python -m etl import banks [--write]                               (offline; --write writes docs/importing-banks.md)
   python -m etl passcode add LABEL [--stdin] | remove LABEL | list   (the sign-in passcodes; etl/passcode_cli.py)
-  python -m etl init [--answers FILE] [--force]                     (the setup conversation; etl/setup_cli.py)
+  python -m etl init [--answers FILE] [--force | --feed]            (the setup conversation; etl/setup_cli.py)
   python -m etl demo [--force]                                      (the invented household; etl/demo_cli.py)
   python -m etl doctor                                              (read-only; etl/doctor_cli.py)
   python -m etl backup [--include-secrets] | restore FILE [--force]  (etl/backup_cli.py)
@@ -25,7 +25,8 @@
   python -m etl upgrade-plan start [--to TAG] | failed STAGE | done   (the Python half of `ff upgrade`)
 
 `validate` prints every problem of the config (exit 1) or `config OK (N files, M accounts)` (exit 0), with the count
-of the household's own presets (config/presets/) when it has any, then any note that refuses nothing (validate.ai_notes). `ingest`,
+of the household's own presets (config/presets/) when it has any, then any note that refuses nothing (validate.ai_notes,
+validate.shared_file_notes). `ingest`,
 `rules`, `ai preview` and `ai run` refuse a config with problems, printing the same lines to stderr and exiting 2 before anything is written; the
 `simplefin` commands check only what a fetch reads (config.FeedConfig) and refuse the same way. With no config
 directory at all, each prints one line instead (validate.missing_config_dir_problem): where it looked, and what to
@@ -47,6 +48,10 @@ directory (etl/install.py holds what they share: its directories and their modes
 `restore` move the household's own files to and from one archive, `preflight` readies an install for compose (and
 refuses one that cannot start safely), `upgrade-plan` is the Python half of an upgrade. Each prints plain lines and
 exits 2 with one line on a refusal, never with a traceback.
+
+Run from the command line (run_command), an error no check foresaw is one line on stderr naming the command, the
+error's kind and the data folder's last-error.txt, which holds its traceback, exit 1; an ingest another one holds off
+past the wait is one line too. FF_DEBUG=1 lets the error through as it is.
 """
 from __future__ import annotations
 
@@ -144,7 +149,10 @@ def main() -> int:
     it = sub.add_parser("init", help="set up a household: the conversation, or --answers FILE")
     it.add_argument("--answers", default=None,
                     help="a YAML file of the answers (it may hold secrets: it must be readable by you alone)")
-    it.add_argument("--force", action="store_true", help="ask again for household.yaml and accounts.yaml")
+    it.add_argument("--force", action="store_true",
+                    help="ask again for household.yaml and accounts.yaml (each kept first as <name>.previous)")
+    it.add_argument("--feed", action="store_true",
+                    help="connect a bank feed to the household set up already, adding its accounts to accounts.yaml")
     it.add_argument("--offline", action="store_true",
                     help="the run has no network: ask for no bank feed setup token (./ff passes it)")
     dm = sub.add_parser("demo", help="the invented Sample household in an empty install directory")
@@ -168,7 +176,7 @@ def main() -> int:
 
     if args.cmd == "init":
         from . import setup_cli
-        return setup_cli.run(args.answers, force=args.force, offline=args.offline)
+        return setup_cli.run(args.answers, force=args.force, offline=args.offline, feed=args.feed)
     if args.cmd == "demo":
         from . import demo_cli
         return demo_cli.run(force=args.force)
@@ -210,7 +218,7 @@ def main() -> int:
 
     if args.cmd == "validate":
         from .config import Config
-        from .validate import ConfigError
+        from .validate import ConfigError, shared_file_notes
         try:
             cfg = Config(source_dir=args.source_dir, check_paths=True)
         except ConfigError as e:
@@ -219,7 +227,7 @@ def main() -> int:
         presets = len(cfg.presets)
         own = f", {presets} preset{'s' if presets != 1 else ''}" if presets else ""
         print(f"config OK ({len(cfg.files)} files, {len(cfg.accounts)} accounts{own})")
-        for note in cfg.notes:
+        for note in [*cfg.notes, *shared_file_notes(cfg)]:
             print(note)
         return 0
 
@@ -344,8 +352,59 @@ def main() -> int:
     return 2
 
 
+# set to any value, an unexpected error is let through with its traceback instead of being said in one line
+DEBUG_VARIABLE = "FF_DEBUG"
+# the file in the data folder an unexpected error's traceback is written to (private to the owner)
+ERROR_FILE = "last-error.txt"
+
+
+def run_command() -> int:
+    """main() as the command line runs it. An ingest another one holds off past the wait is one line on stderr, and so
+    is any error no check foresaw: the command, the error's kind and the file in the data folder its traceback is
+    written to (or, when that cannot be written, how to see it), exit 1 — never a raw traceback. With FF_DEBUG set the
+    error is raised as it is."""
+    command = next((a for a in sys.argv[1:] if not a.startswith("-")), "ingest")
+    try:
+        return main()
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except Exception as e:
+        from .pipeline import IngestBusy
+        if isinstance(e, IngestBusy):
+            print(f"etl {command}: another ingest is running, so this one did not start (two at once would damage "
+                  "the database): try again when it ends.", file=sys.stderr)
+            return 1
+        if os.environ.get(DEBUG_VARIABLE):
+            raise
+        where = _write_error_details(e)
+        said = (f"The details are in {where}. They may name your data (an account, a file, a transaction): read "
+                "them before you share them in a report." if where is not None
+                else f"Run it again with {DEBUG_VARIABLE}=1 to see the details.")
+        print(f"etl {command}: stopped by an unexpected error ({type(e).__name__}). {said}", file=sys.stderr)
+        return 1
+
+
+def _write_error_details(error: Exception) -> Path | None:
+    """Write `error`'s traceback to the data folder's ERROR_FILE, mode 600; its path, or None when it cannot be
+    written."""
+    import traceback
+
+    from .config import Paths
+    try:
+        folder = Paths().data_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / ERROR_FILE
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("".join(traceback.format_exception(error)))
+        os.chmod(path, 0o600)
+        return path
+    except Exception:
+        return None
+
+
 if __name__ == "__main__":
     # what the commands create is readable by its owner's group and others unless it is a secret, whatever umask the
     # caller (or a container) runs with: each secrets path sets its own tighter mode
     os.umask(0o022)
-    sys.exit(main())
+    sys.exit(run_command())

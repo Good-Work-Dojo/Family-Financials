@@ -84,6 +84,16 @@ const kpi = (label: string) => within(card("kpis-second-house")).getByText(label
 /** the cost waterfall's option (the chart whose categories end in "Net /mo") */
 const costChart = () => state.charts.find((o) => o?.xAxis?.data?.includes?.("Net /mo"));
 
+// a newcomer meets "P&I" and "LTCG" here first: the tile and the worksheet's note spell them out
+describe("Second house spells out its abbreviations where a newcomer meets them", () => {
+  it("the payment tile is principal & interest, and the note says long-term capital gains", () => {
+    use(fullMonthsData(5), 1);
+    mount(<SecondHouse />);
+    expect(kpi("Monthly principal & interest")).toBeDefined();
+    expect(document.body.textContent).toContain("long-term capital gains (LTCG) note is an upper bound");
+  });
+});
+
 describe("Second house with too little history to plan from", () => {
   // the first week's data begins on June 6th, in the month in progress: June will be no full month, so the next is July
   for (const [name, data, have, ends] of [["a first week (no full month)", firstWeekData, 0, "Jul 31, 2026"],
@@ -151,8 +161,9 @@ describe("Second house's balances: which there are, and where they come from", (
     const d = fullMonthsData(5);
     use({ ...d, cashflow: d.cashflow.map((m) => ({ ...m, income: 0 })) }, 1);
     mount(<SecondHouse />);
-    expect(kpi("Net after rental").textContent).toMatch(new RegExp("no free cash flow to carry it: income did not cover spending "
-      + `over the last 5 full months \\(${fmtUSD0(-600).replace("$", "\\$")}/mo\\)$`));
+    const net = kpi("Net after rental").textContent ?? "";
+    expect(net.endsWith("no free cash flow to carry it: income did not cover spending "
+      + `over the last 5 full months (${fmtUSD0(-600)}/mo)`), net).toBe(true);
     expect(kpi("Net after rental").querySelector(".text-amber-400"), "a cost against no free cash flow is a warning").not.toBeNull();
   });
   it("a household with a feed keeps the feed's words (control)", () => {
@@ -395,7 +406,8 @@ describe("Second house's funding verdict claims only what every draw shows", () 
     cleanup();
     useFunding(scenario("a", "Lake house", { chk: 12_000, sav: 50_000.3, k401: 77_999.7 }));
     mount(<SecondHouse />);
-    expect(tile("Liquid cash after cash draws")).toMatch(new RegExp(`^Liquid cash after cash draws${fmtUSD(0.3).replace("$", "\\$")} short`));
+    const liquid = tile("Liquid cash after cash draws") ?? "";
+    expect(liquid.startsWith(`Liquid cash after cash draws${fmtUSD(0.3)} short`), liquid).toBe(true);
     expect(tile("Essentials cushion")).toContain(`the cash draws are ${fmtUSD(0.3)} more than today's liquid cash`);
   });
   it("while the scenarios load, the line is a busy status, announced once", () => {

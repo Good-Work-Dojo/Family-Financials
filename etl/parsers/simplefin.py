@@ -28,6 +28,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..dates import snapshot_fetched_at, squash
+from ..importers.registry import MAX_DESCRIPTION
 from ..models import (
     ACCOUNT_KINDS,
     CASHFLOW_KINDS,
@@ -75,9 +76,28 @@ def _zone(tz: str) -> dt.tzinfo:
 
 
 def _iso(epoch, zone: dt.tzinfo) -> str | None:
-    if not epoch:
+    """The local date, in `zone`, of a feed epoch: a whole or fractional number of seconds, or text holding one (some
+    bridges send "1700000000.0"). None for no value (empty, 0) and for anything else: a truth value, a container, text
+    that is no number, a value that is not finite or lies past the years a date can hold."""
+    if not epoch or isinstance(epoch, bool):
         return None
-    return dt.datetime.fromtimestamp(int(epoch), zone).date().isoformat()
+    try:
+        seconds = int(float(epoch)) if isinstance(epoch, str) else int(epoch)
+        return dt.datetime.fromtimestamp(seconds, zone).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _bad_epoch(value) -> bool:
+    """A date field the feed filled with something _iso cannot read (an absent or empty one is no date, not a bad one)"""
+    return value not in (None, "", 0)
+
+
+def _text(value) -> str:
+    """A text field as text: a number the feed sent in its place is written out; absent, null or a container is empty"""
+    if isinstance(value, str):
+        return value
+    return str(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else ""
 
 
 def _snap_date(path: Path, zone: dt.tzinfo) -> str | None:
@@ -148,7 +168,15 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
     earliest_raw maps account_id -> the earliest *unfiltered* txn date in this
     snapshot, used by the pipeline to detect a cutover gap across all snapshots.
     `tz` is the household's IANA zone; every date is drawn in it, and an unknown
-    name raises ValueError before the file is read."""
+    name raises ValueError before the file is read.
+
+    A file that is no JSON object, or whose `accounts` is there and no list,
+    raises ValueError (the pipeline makes it that snapshot's failing check). Inside it, an account,
+    a row or a holding of the wrong shape is skipped with a warn
+    (`simplefin.bad_account.<file>`, `simplefin.bad_row.<account>`), and so is a
+    row whose date is unreadable (`simplefin.bad_date.<account>`); an unreadable
+    balance date warns too (`simplefin.bad_balance_date.<account>`) and books no
+    balance point."""
     zone = _zone(tz)
     stats = FileStats(source_file=path.name, parser="simplefin")
     txns: list[Txn] = []
@@ -167,14 +195,29 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
         return bool(registry) and a.get("id") in (
             account_meta[registry].get("simplefin_id_history") or ())
 
+    def _warn_once(name: str, detail: str) -> None:
+        if not any(c.name == name for c in checks):
+            checks.append(QualityCheck(name=name, status="warn", detail=detail))
+
     doc = json.loads(path.read_text())
-    for acct in sorted(doc.get("accounts", []), key=_is_historical):
+    if not isinstance(doc, dict) or not isinstance(doc.get("accounts", []), list):
+        raise ValueError("not a JSON object holding a list of accounts")
+    entries = []
+    for acct in doc.get("accounts", []):
+        if isinstance(acct, dict) and (acct.get("id") is None or isinstance(acct.get("id"), str)):
+            entries.append(acct)
+        else:
+            _warn_once(f"simplefin.bad_account.{path.name}",
+                       f"An account in the bank feed's stored answer {path.name} is not laid out as the feed's "
+                       f"accounts are, so it was skipped; the answer's other accounts are read.")
+    for acct in sorted(entries, key=_is_historical):
         sfid = acct.get("id")
         account_id = sfid_to_account.get(sfid)
         if not account_id:
             if sfid in ignore:        # expected unmapped (duplicate twin / dead account)
                 continue
-            org = (acct.get("org") or {}).get("name", "?")
+            org = acct.get("org")
+            org = org.get("name", "?") if isinstance(org, dict) else (org if isinstance(org, str) else "?")
             checks.append(QualityCheck(
                 name=f"simplefin.unmapped.{sfid}", status="warn",
                 detail=f"{org} / {acct.get('name', '?')} "
@@ -200,6 +243,10 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
 
         # ---- balance observation (all kinds) -----------------------------
         bal_date = _iso(acct.get("balance-date"), zone)
+        if bal_date is None and _bad_epoch(acct.get("balance-date")):
+            _warn_once(f"simplefin.bad_balance_date.{account_id}",
+                       "The bank feed sent this account's balance with a date that is no date, so that balance was "
+                       "skipped; the next answer with a readable date counts.")
         raw_bal = acct.get("balance")
         balance_cents = _cents(raw_bal)
         if balance_cents is None and raw_bal not in (None, ""):
@@ -231,12 +278,26 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
                              and not meta.get("parser")
                              and not meta.get("simplefin_cutover"))
         cutover = cutovers.get(account_id)
-        for txn in (() if balances_only else acct.get("transactions", [])):
+        bad_row = (f"simplefin.bad_row.{account_id}",
+                   "The bank feed sent a row or a holding of this account that is not laid out as the feed's are, so "
+                   "it was skipped; the account's other rows are read.")
+        rows = acct.get("transactions")
+        if rows is not None and not isinstance(rows, list):
+            _warn_once(*bad_row)
+        for txn in (() if balances_only or not isinstance(rows, list) else rows):
             stats.rows_total += 1
+            if not isinstance(txn, dict):
+                _warn_once(*bad_row)
+                stats.skip("unparseable-row"); continue
             if txn.get("pending"):
                 stats.skip("pending"); continue
-            date = _iso(txn.get("posted") or txn.get("transacted_at"), zone)
+            when = txn.get("posted") or txn.get("transacted_at")
+            date = _iso(when, zone)
             if not date:
+                if _bad_epoch(when):
+                    _warn_once(f"simplefin.bad_date.{account_id}",
+                               "The bank feed sent a row of this account with a date that is no date, so it was "
+                               "skipped.")
                 stats.skip("no-date"); continue
             prev = earliest_raw.get(account_id)   # pre-cutover earliest, for gap check
             if prev is None or date < prev:
@@ -251,8 +312,8 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
                         name=f"simplefin.bad_amount.{account_id}", status="warn",
                         detail=f"unparseable amount {raw_amt!r} on {date}; skipped"))
                 stats.skip("no-amount"); continue
-            desc = squash(txn.get("description") or "")
-            payee = squash(txn.get("payee") or "")
+            desc = squash(_text(txn.get("description")))
+            payee = squash(_text(txn.get("payee")))
             if payee and payee.lower() not in desc.lower():
                 desc = f"{payee} — {desc}" if desc else payee
             desc = desc or "(no description)"
@@ -260,25 +321,37 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
             t = Txn(date=date, account_id=account_id, description_raw=desc,
                     amount_cents=amount, source_file=path.name,
                     bank_type="simplefin", seq=_seq_from_id(tid), sf_tid=tid)
-            cat = (txn.get("extra") or {}).get("category")
+            extra = txn.get("extra")
+            cat = extra.get("category") if isinstance(extra, dict) else None
             if cat:
                 t.bank_category = str(cat)
             if meta.get("kind") == "brokerage":
-                if _TRADE_RE.search(desc) or _OPTION_RE.search(desc):
+                # the wording is read in the description's first characters, as a statement file's is stored: the
+                # patterns' unbounded gaps would cost minutes on a feed description thousands of characters long, and
+                # the description itself (the row's uid) is kept whole
+                head = desc[:MAX_DESCRIPTION]
+                if _TRADE_RE.search(head) or _OPTION_RE.search(head):
                     t.type = "investment"      # money moving within the brokerage
                     t.is_internal = True
-                elif _DIVIDEND_RE.search(desc):       # a cash dividend: income
+                elif _DIVIDEND_RE.search(head):       # a cash dividend: income
                     t.type, t.category, t.subcategory = "dividend", INCOME_CATEGORY, "Dividends"
-                elif _MARGIN_INT_RE.search(desc):     # interest charged on a margin balance
+                elif _MARGIN_INT_RE.search(head):     # interest charged on a margin balance
                     t.type, t.category, t.subcategory = "fee", FEES_CATEGORY, "Margin Interest"
-                elif _CASHBACK_RE.search(desc):       # card rewards swept in — new money
+                elif _CASHBACK_RE.search(head):       # card rewards swept in — new money
                     t.type, t.category, t.subcategory = "income", INCOME_CATEGORY, "Reimbursement"
             txns.append(t)
             stats.observe(date, amount)
 
         # ---- investment holdings ----------------------------------------
         # every holding of an account takes the account's one class (Config.asset_class_of reads the same entry)
-        for h in acct.get("holdings") or []:
+        held = acct.get("holdings") or []
+        if not isinstance(held, list):
+            _warn_once(*bad_row)
+            held = []
+        for h in held:
+            if not isinstance(h, dict):
+                _warn_once(*bad_row)
+                continue
             value = _cents(h.get("market_value"))
             if value is None:
                 continue
@@ -290,8 +363,8 @@ def parse_snapshot(path: Path, sfid_to_account: dict[str, str],
                     cost = round(pp * qty * 100)
             holdings.append(Holding(
                 account=meta["name"], institution=meta["institution"],
-                owner=meta["owner"], symbol=(h.get("symbol") or None),
-                name=(h.get("description") or h.get("symbol") or "?"),
+                owner=meta["owner"], symbol=(_text(h.get("symbol")) or None),
+                name=(_text(h.get("description")) or _text(h.get("symbol")) or "?"),
                 asset_class=account_asset_class(meta),
                 quantity=qty, value_cents=value,
                 cost_basis_cents=cost, as_of=(bal_date or snap_date or ""),

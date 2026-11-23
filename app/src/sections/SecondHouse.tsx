@@ -100,7 +100,7 @@ function SecondHousePage() {
           {api.active && (
             <p className="text-[10px] text-faint">
               A deterministic worksheet, not a forecast: home value is held flat (no
-              appreciation assumed), rental income is your own estimate, and the LTCG
+              appreciation assumed), rental income is your own estimate, and the long-term capital gains (LTCG)
               note is an upper bound (it assumes the whole draw is gain).{" "}
               {ctx.feed
                 ? "Account balances come from the bank feed — each shows its as-of date."
@@ -261,7 +261,7 @@ function Worksheet({ scenario, api, ctx }: {
       <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-5">
         <DealInputsCard i={i} set={set} className="xl:col-span-2" />
         <div data-testid="kpis-second-house" className="grid content-start gap-3 sm:grid-cols-2 xl:col-span-3">
-          <StatCard label="Monthly P&I" value={fmtUSD0(d.pi)}
+          <StatCard label="Monthly principal & interest" value={fmtUSD0(d.pi)}
             sub={`${fmtUSD0(downPaymentUSD(i))} down (${pctText(i.downPct)}) · 30yr @ ${pctText(i.ratePct, 3)}`} />
           <StatCard label="Cash needed" value={fmtUSD0(d.needed)}
             sub="down payment + closing + post-move-in" />
@@ -455,7 +455,7 @@ function FundingCard({ d, ltcgPct, generatedAt, feed, onDraw }: {
                     )}
                     {r.taxableDrag && r.draw > 0 && (
                       <span className="text-amber-300/80"
-                        title="selling positions may realize gains; the ceiling assumes the whole draw is long-term gain">
+                        title="long-term capital gains (LTCG) tax: selling positions may realize gains; the ceiling assumes the whole draw is long-term gain">
                         up to {fmtUSD0(capGainsDragMax(r.draw, ltcgPct))} LTCG @ {pctText(ltcgPct, 0)}
                       </span>
                     )}

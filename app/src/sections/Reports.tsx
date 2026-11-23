@@ -73,7 +73,7 @@ export default function Reports() {
           <Pick label="Group by" value={spec.groupBy} options={GROUP_BYS} optionLabels={GROUP_BY_LABELS} onChange={(v) => setSpecKey("groupBy", v)} />
           <Pick label="Interval" value={spec.interval} options={INTERVALS} optionLabels={INTERVAL_LABELS} onChange={(v) => setSpecKey("interval", v)} />
           <Pick label="Measure" value={spec.measure} options={MEASURES} optionLabels={MEASURE_LABELS} onChange={(v) => setSpecKey("measure", v)} />
-          <SegmentToggle value={spec.chart} options={CHARTS.map((c) => ({ value: c, label: CHART_LABELS[c] }))} onChange={(v) => setSpecKey("chart", v)} />
+          <SegmentToggle label="Chart type" value={spec.chart} options={CHARTS.map((c) => ({ value: c, label: CHART_LABELS[c] }))} onChange={(v) => setSpecKey("chart", v)} />
           <SaveReport spec={spec} />
         </div>
         <SavedReportsMenu />

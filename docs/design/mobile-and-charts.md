@@ -11,7 +11,9 @@
 wrapped onto a second line at a word, never cut inside one), the freshness pill, the privacy eye and the search button,
 each 44px; under that row the bar carries a `notice` while it has one (the "Updated" line of another device's rebuild,
 `RefreshUpdatedStrip`), so the bar grows rather than anything hanging over the page. A hub's h1 is screen-reader only
-there. `useIsMobile()` (`lib/useMediaQuery.ts`) is the shared breakpoint hook.
+there. The drawer (`components/NavDrawer.tsx`) is inert while closed, so a keyboard or a screen reader goes from the
+menu button straight to the page; open, it is a modal dialog named "Menu" (focus moves in, Tab stays inside, Escape
+closes it and focus goes back to the menu button, whose `aria-expanded` says which). `useIsMobile()` (`lib/useMediaQuery.ts`) is the shared breakpoint hook.
 
 - **Words follow the pointer, never the width** (`lib/pointerWords.ts`, `usePointerWords()` on `(pointer: coarse)`):
   a finger reads "tap" where a mouse reads "click", "Pinch the chart to zoom" for "Scroll on the chart to zoom", and is

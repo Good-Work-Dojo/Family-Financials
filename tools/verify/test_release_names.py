@@ -138,6 +138,37 @@ def test_the_command_prints_the_outputs_and_a_bad_argument_is_exit_2(tmp_path, c
         assert capsys.readouterr().err.startswith(("release:", "usage:"))
 
 
+@pytest.mark.parametrize("tag, tree", [("v1.0.1", "1.0.1"), ("v1.0.1-rc.2", "1.0.1"), ("v2.10.0", "2.10.0")])
+def test_a_tag_of_the_trees_version_or_a_candidate_of_it_is_taken(tag, tree):
+    assert rn.check_version(tag, tree) is None
+
+
+@pytest.mark.parametrize("tag, tree", [("v1.0.1", "1.0.0"), ("v1.0.1-rc.1", "1.0.0"), ("v1.0.0", "1.0.1"),
+                                       ("v1.0.1", "1.0.1-rc.1")])
+def test_a_tag_of_another_version_than_the_trees_is_refused_saying_what_to_bump(tag, tree):
+    with pytest.raises(ValueError) as refused:
+        rn.check_version(tag, tree)
+    words = str(refused.value)
+    assert tag in words and tree in words and "etl/install.py" in words
+
+
+def test_the_trees_version_is_read_from_etl_install_as_pyproject_states_it():
+    pyproject = re.search(r'^version = "([^"]+)"', (ROOT / "pyproject.toml").read_text("utf-8"), re.M).group(1)
+    assert rn.tree_version((ROOT / "etl" / "install.py").read_text("utf-8")) == pyproject
+    with pytest.raises(ValueError, match="no VERSION"):
+        rn.tree_version("VERSION_LIKE = 1\n")
+
+
+def test_the_check_version_command_is_silent_when_they_agree_and_exit_2_when_not(tmp_path, capsys):
+    install_py = tmp_path / "install.py"
+    install_py.write_text('ROOT = 1\nVERSION = "1.0.1"\n')
+    assert rn.main(["check-version", str(install_py), "v1.0.1-rc.1"]) == 0
+    assert capsys.readouterr() == ("", "")
+    assert rn.main(["check-version", str(install_py), "v1.0.2"]) == 2
+    assert capsys.readouterr().err.startswith("release: the tag v1.0.2")
+    assert rn.main(["check-version", str(tmp_path / "missing.py"), "v1.0.1"]) == 2
+
+
 # ---------------------------------------------------------------- the workflow
 
 
@@ -287,8 +318,18 @@ exit 0
 
 
 def run_prepare(tmp_path: Path, event: str, prerelease: str = "", view: str = "", released: str = "",
-                tag: str = "v1.0.0") -> tuple[subprocess.CompletedProcess, list[str], dict[str, str]]:
+                tag: str = "v1.0.0", tree: str | None = None
+                ) -> tuple[subprocess.CompletedProcess, list[str], dict[str, str]]:
+    """The step run in a copy of what it reads (the script, CHANGELOG.md, and an etl/install.py whose VERSION is
+    `tree`, by default the tag's own version without its pre-release part), so the tags these tests name never hang
+    on the version the tree is at."""
     step = next(s for s in workflow()["jobs"]["prepare"]["steps"] if s.get("id") == "names")
+    cwd = tmp_path / "tree"
+    (cwd / "tools" / "verify").mkdir(parents=True, exist_ok=True)
+    (cwd / "etl").mkdir(exist_ok=True)
+    (cwd / "tools" / "verify" / "release_names.py").write_bytes((HERE / "release_names.py").read_bytes())
+    (cwd / "CHANGELOG.md").write_bytes((ROOT / "CHANGELOG.md").read_bytes())
+    (cwd / "etl" / "install.py").write_text(f'VERSION = "{tree or tag[1:].split("-")[0]}"\n')
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     for name, body in (("gh", STEP_GH), ("git", STEP_GIT),
@@ -303,9 +344,17 @@ def run_prepare(tmp_path: Path, event: str, prerelease: str = "", view: str = ""
            "EVENT": event, "GH_TOKEN": "sample", "REPOSITORY": "Good-Work-Dojo/Family-Financials",
            "SOURCE": "https://github.com/Good-Work-Dojo/Family-Financials", "TAG": tag, "PRERELEASE": prerelease}
     assert set(step["env"]) <= set(env), "the test gives the step every variable the workflow does"
-    r = subprocess.run(["bash", "-c", step["run"]], env=env, cwd=ROOT, capture_output=True, text=True, timeout=60)
+    r = subprocess.run(["bash", "-c", step["run"]], env=env, cwd=cwd, capture_output=True, text=True, timeout=60)
     outputs = dict(line.split("=", 1) for line in out.read_text().splitlines() if "=" in line)
     return r, log.read_text().splitlines(), outputs
+
+
+@pytest.mark.parametrize("tag, tree", [("v1.0.0", "1.0.1"), ("v1.0.0-rc.1", "0.9.0")])
+def test_the_prepare_step_refuses_a_tag_whose_version_the_tree_is_not_at_before_anything_else(tmp_path, tag, tree):
+    r, calls, outputs = run_prepare(tmp_path, "release", "false", released="v0.9.0\n", tag=tag, tree=tree)
+    assert r.returncode != 0 and f"release: the tag {tag}" in r.stderr
+    assert outputs == {} and not [c for c in calls if c.startswith("gh ")]
+    assert (tmp_path / "summary").read_text() == ""
 
 
 @pytest.mark.parametrize("event, prerelease, view, tags", [
@@ -543,6 +592,46 @@ def test_the_build_step_fails_without_a_digest_and_gives_none(tmp_path, metadata
     r, argv, out = run_build(tmp_path, step, metadata)
     assert r.returncode != 0 and "no image digest" in r.stderr
     assert argv[:2] == ["buildx", "build"] and out == ""
+
+
+# the join step's script run in bash: docker records each call and answers `imagetools inspect` as buildx prints an
+# index, its digest by the image (STUB_INDEX_<etl|web>)
+STEP_JOIN_DOCKER = """#!/usr/bin/env bash
+echo "docker $*" >>"$STUB_LOG"
+if [ "$2 $3" = "imagetools inspect" ]; then
+  case "$4" in *-etl:*) d="$STUB_INDEX_ETL" ;; *) d="$STUB_INDEX_WEB" ;; esac
+  printf 'Name:      %s\\nMediaType: application/vnd.oci.image.index.v1+json\\nDigest:    %s\\n' "$4" "$d"
+fi
+"""
+
+
+def run_join(tmp_path: Path, etl_index: str, web_index: str) -> tuple[subprocess.CompletedProcess, str]:
+    step = join_step()
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "docker").write_text(STEP_JOIN_DOCKER)
+    (bindir / "docker").chmod(0o755)
+    summary = tmp_path / "summary"
+    summary.write_text("")
+    digests = {k: "sha256:" + c * 64 for k, c in (("ETL_AMD64", "1"), ("ETL_ARM64", "2"), ("WEB_AMD64", "3"),
+                                                   ("WEB_ARM64", "4"))}
+    values = {"ETL": "ghcr.io/good-work-dojo/family-financials-etl", "WEB": "ghcr.io/good-work-dojo/family-financials-web",
+              "SOURCE": SOURCE, "VERSION": "1.0.1", "REVISION": REVISION, "TAGS": "1.0.1 1.0 latest", **digests}
+    env = {"PATH": f"{bindir}:/usr/bin:/bin", "STUB_LOG": str(tmp_path / "calls"), "STUB_INDEX_ETL": etl_index,
+           "STUB_INDEX_WEB": web_index, "RUNNER_TEMP": str(tmp_path), "GITHUB_STEP_SUMMARY": str(summary),
+           **{k: values[k] for k in step["env"]}}
+    r = subprocess.run(["bash", "-c", step["run"]], env=env, capture_output=True, text=True, timeout=60)
+    return r, summary.read_text()
+
+
+def test_the_join_prints_each_index_digest_in_the_run_summary(tmp_path):
+    etl, web = "sha256:" + "ab" * 32, "sha256:" + "cd" * 32
+    r, summary = run_join(tmp_path, etl, web)
+    assert r.returncode == 0, r.stderr
+    assert f"ghcr.io/good-work-dojo/family-financials-etl:1.0.1@{etl}" in summary
+    assert f"ghcr.io/good-work-dojo/family-financials-web:1.0.1@{web}" in summary
+    r, summary = run_join(tmp_path, "sha256:short", web)
+    assert r.returncode != 0 and "no digest" in r.stderr
 
 
 def test_the_sign_in_passes_the_token_on_standard_input_and_never_as_an_argument(tmp_path):

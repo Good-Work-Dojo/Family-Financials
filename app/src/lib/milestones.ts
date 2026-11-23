@@ -14,6 +14,7 @@ export function milestoneCrossings(data: AppData): MilestoneCrossing[] {
   const seen = new Set<number>();
   for (let i = 1; i < snaps.length; i++) {
     const a = snaps[i - 1], b = snaps[i];
+    if (b.total === a.total) continue;   // a flat step crosses nothing (and its share of the step would be 0/0)
     const lo = Math.min(a.total, b.total), hi = Math.max(a.total, b.total);
     for (let level = Math.ceil(lo / 100_000) * 100_000; level <= hi; level += 100_000) {
       if (seen.has(level) || b.total < a.total) continue;   // only upward firsts

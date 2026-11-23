@@ -334,10 +334,13 @@ def test_duplicate_rule_names_are_rejected_within_one_compile():
 
 def test_validate_taxonomy_names_the_rule():
     taxonomy = {"Dining": ["Coffee"], "Internal": []}
-    rules = R.compile_rules([{"name": "a", "pattern": "A", "category": "Dining", "subcategory": "Coffee"},
-                             {"pattern": "B", "category": "Internal", "subcategory": "anything"}],   # Internal subs are dynamic
+    rules = R.compile_rules([{"name": "a", "pattern": "A", "category": "Dining", "subcategory": "Coffee"}],
                             source="keyword_rules")
     R.validate_taxonomy(rules, taxonomy)                                   # no raise
+    # a rule cannot make a row internal: filing one under Internal would leave it spending, so it is refused
+    with pytest.raises(ValueError, match=r"^keyword_rules\[0\]: category 'Internal' does not make a row internal"):
+        R.validate_taxonomy(R.compile_rules([{"pattern": "B", "category": "Internal", "subcategory": "anything"}],
+                                            source="keyword_rules"), taxonomy)
     R.validate_taxonomy(R.compile_rules([{"pattern": "C", "vendor": "C"}], source="vendor_rules"), taxonomy)   # no category: fine
     with pytest.raises(ValueError, match=r"^keyword_rules\[0\]: category 'Dinning' not in taxonomy"):    # nameless: the position says it
         R.validate_taxonomy(R.compile_rules([{"pattern": "A", "category": "Dinning"}], source="keyword_rules"), taxonomy)

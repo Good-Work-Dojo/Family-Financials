@@ -166,6 +166,54 @@ def test_a_signed_rule_types_only_its_sign_and_the_other_sign_reaches_the_next_r
         assert (returned.type, returned.is_internal) == ("transfer", True), f"{account}: credit typed {returned.type!r}"
 
 
+def test_bank_any_names_no_counterpart_in_a_one_account_household():
+    """A household whose only bank account is the leg's own: `bank_any` points at no other account, so the unmatched
+    leg is no gap in the data and raises no question (the leg's own data always covers its own date)."""
+    rules = {"rules": [{"name": "demo-sweep", "pattern": "DEMO SWEEP OUT", "type": "transfer", "sign": "debit",
+                        "accounts": ["demo_checking_0000"], "counter_hint": "bank_any"}]}
+    kinds = {"demo_checking_0000": "checking"}
+    compiled = compile_transfer_rules(SimpleNamespace(transfer_rules=rules, accounts={a: {"kind": k}
+                                                                                      for a, k in kinds.items()}))
+    eng = TransferEngine(compiled, rules, {}, {"demo_checking_0000": ("2030-01-01", "2030-03-31")},
+                         {"demo_checking_0000"}, account_kinds=kinds)
+    lone = tx("2030-02-05", "demo_checking_0000", "DEMO SWEEP OUT 0003", -6789)
+    res = eng.phase_a([lone])
+    eng.phase_b([lone], res)
+    eng.phase_c([lone], res)
+    assert eng._counter_accounts(lone) == []
+    assert (lone.type, lone.match_status) == ("transfer", "unmatched_window")
+    assert res.open_questions == []
+
+
+@pytest.mark.parametrize("hint,named", [(hh.SAVINGS, "Joint Savings"), ("bank_any", "another bank account"),
+                                        ("kind:savings", "a savings account"),
+                                        ("demo_pair", "the accounts of the group demo_pair")])
+def test_a_gap_question_names_the_accounts_by_their_names_in_counted_words(hint, named):
+    """The question a person reads on the Data page: the row's account and its counterpart by name, the count in
+    words that agree with it"""
+    rules = {"rules": [{"name": "demo-sweep", "pattern": "DEMO SWEEP OUT", "type": "transfer", "sign": "debit",
+                        "accounts": [hh.CHECKING], "counter_hint": hint}],
+             "groups": {"demo_pair": {"accounts": [hh.CHECKING, hh.SAVINGS], "expect_counterpart": True}}}
+    kinds = {hh.CHECKING: "checking", hh.SAVINGS: "savings"}
+    names = {a: hh.ACCOUNTS[a].name for a in kinds}
+    compiled = compile_transfer_rules(SimpleNamespace(transfer_rules=rules, accounts={a: {"kind": k}
+                                                                                      for a, k in kinds.items()}))
+    windows = {a: ("2030-01-01", "2030-03-31") for a in kinds}
+    for n in (1, 2):
+        eng = TransferEngine(compiled, rules, {}, windows, set(kinds), account_kinds=kinds, account_names=names)
+        rows = [tx(f"2030-02-0{i + 1}", hh.CHECKING, f"DEMO SWEEP OUT 000{i}", -1000 - i) for i in range(n)]
+        res = eng.phase_a(rows)
+        eng.phase_b(rows, res)
+        eng.phase_c(rows, res)
+        [q] = res.open_questions
+        account = names[hh.CHECKING]
+        assert q.question == (
+            f"1 internal row in {account} has no matching row in {named}, though the data there covers its date: "
+            "likely that export omits it. It stays out of spending." if n == 1 else
+            f"2 internal rows in {account} have no matching row in {named}, though the data there covers their "
+            "dates: likely that export omits them. They stay out of spending.")
+
+
 def test_bank_any_hint_points_at_every_bank_account():
     """`counter_hint: bank_any` names no account. In pairing it scores a counterpart on any bank account above an
     equally viable one elsewhere, nearer or not; once a leg is left unmatched, every bank account is a counterpart

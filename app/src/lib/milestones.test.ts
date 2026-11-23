@@ -30,4 +30,15 @@ describe("milestoneCrossings", () => {
     expect(m18.date.startsWith("2024-0") || m18.date.startsWith("2024-1")).toBe(true);
     expect(m18.daggered).toBe(false);
   });
+  // two snapshots with the same total on a $100K level divide nothing by nothing: no pin at an unreadable date
+  it("equal totals on a level give no pin of their own, and every pin has a real date", () => {
+    for (const totals of [[100_000, 100_000, 250_000], [0, 0, 120_000], [0, 0]]) {
+      const data = appData({ assets: { snapshots: totals.map((total, i) => snap({ snapshot_date: `202${4 + i}-01-01`, total })) } });
+      const xs = milestoneCrossings(data);
+      for (const x of xs) expect(x.date, `${totals}: ${x.level}`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+    const xs = milestoneCrossings(appData({ assets: { snapshots: [100_000, 100_000, 250_000].map((total, i) =>
+      snap({ snapshot_date: `202${4 + i}-01-01`, total })) } }));
+    expect(xs.map((x) => [x.level, x.date])).toEqual([[100_000, "2025-01-01"], [200_000, "2025-09-01"]]);
+  });
 });

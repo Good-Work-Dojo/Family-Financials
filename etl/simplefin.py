@@ -35,7 +35,9 @@ Design constraints (Bridge):
     before the claim is named by its host alone, a failed claim by its path
     without the token's segment.
   * Snapshots are append-only and immutable (one fetch = one file); the union of
-    all snapshots over time IS the balance/holdings history.
+    all snapshots over time IS the balance/holdings history. An answer holding no
+    account is not stored, and one not laid out as the protocol's is refused; each
+    file is written whole before it takes its name.
 """
 from __future__ import annotations
 
@@ -166,9 +168,11 @@ def _built(seam: bool) -> urllib.request.OpenerDirector:
 def _transient(exc: Exception) -> bool:
     """Is this worth another attempt? HTTPError is a URLError subclass, so it is
     tested first: a 4xx (bad/revoked credential) is permanent and retrying it would
-    spend request budget to fail three times instead of once."""
+    spend request budget to fail three times instead of once. A 429 is the bridge
+    saying the budget is spent: asking again within seconds spends more of it, so
+    it is left to the next scheduled refresh."""
     if isinstance(exc, urllib.error.HTTPError):
-        return exc.code == 429 or 500 <= exc.code < 600
+        return 500 <= exc.code < 600
     return isinstance(exc, (TimeoutError, urllib.error.URLError, http.client.HTTPException))
 
 
@@ -227,7 +231,7 @@ def _request(url: str, method: str = "GET", data: bytes | None = None) -> bytes:
                 raise _fatal(e, method, shown, attempt + 1) from e
             # NOT "WARN simplefin" — deploy/refresh.sh treats that prefix as a
             # connection needing re-auth and would alert on a retry we recovered from.
-            print(f"  INFO simplefin: {method} {parts.path} failed ({type(e).__name__}); "
+            print(f"  INFO simplefin: {method} {shown} failed ({type(e).__name__}); "
                   f"retrying in {waits[attempt]}s "
                   f"(attempt {attempt + 2} of {len(waits) + 1})", file=sys.stderr)
             time.sleep(waits[attempt])
@@ -268,7 +272,7 @@ def claim(cfg, setup_token: str, force: bool = False) -> Path:
 
 # ----------------------------------------------------------------------- fetch
 
-def fetch(cfg, days: int | None = None, end: dt.datetime | None = None) -> Path:
+def fetch(cfg, days: int | None = None, end: dt.datetime | None = None) -> Path | None:
     """One all-accounts request over a rolling window; append a raw snapshot.
 
     `days` is the transaction look-back (balances + holdings are always current),
@@ -278,10 +282,17 @@ def fetch(cfg, days: int | None = None, end: dt.datetime | None = None) -> Path:
     refresh's window. An explicit `days` always wins (the one-time backfill asks
     for 90 to fill the CSV->today gap). The request asks for protocol version 2
     and never for pending rows.
+
+    An answer that is no JSON object holding a list of account objects is refused
+    in one line and not stored. One holding no account (a day-one re-auth answers
+    its errors alone) prints its errors and is not stored either: None is returned.
+    The answer is written whole to a hidden file first and linked under its name
+    once it is on disk (_store), so a full disk or a kill mid-write never leaves a
+    half-written snapshot for every later ingest to read.
     """
     access_url = read_access_url(cfg.simplefin_credential_path)
     if days is None:
-        days = _DEFAULT_DAYS if cfg.find_simplefin_snapshots() else _MAX_WINDOW_DAYS
+        days = _DEFAULT_DAYS if _any_holds_accounts(cfg.find_simplefin_snapshots()) else _MAX_WINDOW_DAYS
     days = max(1, min(days, _MAX_WINDOW_DAYS))
     end_dt = end or now_utc()
     start = int((end_dt - dt.timedelta(days=days)).timestamp())  # never 0
@@ -290,18 +301,71 @@ def fetch(cfg, days: int | None = None, end: dt.datetime | None = None) -> Path:
     body = _request(f"{access_url.rstrip('/')}/accounts?{q}")
     try:
         doc = json.loads(body)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise SystemExit(f"SimpleFIN returned non-JSON ({e}); not storing.") from e
+    if not isinstance(doc, dict) or not _is_account_list(doc.get("accounts")):
+        raise SystemExit("SimpleFIN answered without a list of accounts; not storing.")
     _warn_errors(doc)
-    cfg.simplefin_snapshots_dir.mkdir(parents=True, exist_ok=True)
-    stamp = end_dt.strftime("%Y%m%dT%H%M%SZ")
-    out = cfg.simplefin_snapshots_dir / f"accounts-{stamp}.json"
-    n = 1   # snapshots are immutable+append-only; never overwrite a same-second file
-    while out.exists():
-        out = cfg.simplefin_snapshots_dir / f"accounts-{stamp}-{n}.json"
-        n += 1
-    out.write_bytes(body)
-    print(f"Fetched {len(doc.get('accounts', []))} accounts ({days}d window) -> {out.name}")
+    if not doc["accounts"]:
+        print(f"Fetched 0 accounts ({days}d window): nothing stored")
+        return None
+    out = _store(cfg.simplefin_snapshots_dir, end_dt.strftime("%Y%m%dT%H%M%SZ"), body)
+    print(f"Fetched {len(doc['accounts'])} accounts ({days}d window) -> {out.name}")
+    return out
+
+
+def _is_account_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(a, dict) for a in value)
+
+
+def _any_holds_accounts(snapshots: list[Path]) -> bool:
+    """Whether any stored snapshot holds an account, newest first (usually the first one read answers): one stored with
+    none, or one that cannot be read, does not count, so the next fetch still asks for the whole 90 days"""
+    for path in reversed(snapshots):
+        try:
+            doc = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("accounts"), list) and doc["accounts"]:
+            return True
+    return False
+
+
+def _store(folder: Path, stamp: str, body: bytes) -> Path:
+    """Write `body` as a new snapshot named for `stamp`: whole to a hidden temporary file in `folder` (flushed to disk),
+    then hard-linked under the first free name (`accounts-<stamp>.json`, else `accounts-<stamp>-<n>.json`: snapshots are
+    append-only, so a same-second file is never overwritten) and the temporary name removed. On a file system that
+    holds no hard link the whole file is renamed onto the free name instead. A failure leaves no snapshot and no
+    temporary file, and is the module's one-line SystemExit."""
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / f".accounts-{stamp}.{os.getpid()}.tmp"
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        try:
+            view = memoryview(body)
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        n = 0
+        while True:
+            out = folder / (f"accounts-{stamp}.json" if n == 0 else f"accounts-{stamp}-{n}.json")
+            try:
+                os.link(tmp, out)
+                break
+            except FileExistsError:
+                n += 1
+            except OSError:
+                if out.exists():
+                    n += 1
+                    continue
+                os.replace(tmp, out)
+                break
+    except OSError as e:
+        raise SystemExit(f"SimpleFIN answer could not be stored ({e.strerror or e}); nothing was stored.") from e
+    finally:
+        tmp.unlink(missing_ok=True)
     return out
 
 
@@ -336,14 +400,22 @@ def _listed(value) -> list:
 # --------------------------------------------------------------- list-accounts
 
 def list_accounts(cfg) -> None:
-    """Print the newest snapshot's accounts to help fill simplefin_id/cutover. The
-    institution is a version-1 account's `org`, else the name of the connection a
-    version-2 account's `conn_id` names."""
-    snaps = cfg.find_simplefin_snapshots()
-    if not snaps:
-        raise SystemExit("No snapshots yet. Run: python -m etl simplefin fetch")
-    snap = snaps[-1]
-    doc = json.loads(snap.read_text())
+    """Print the newest readable snapshot's accounts to help fill simplefin_id/cutover
+    (`./ff simplefin list-accounts`). The institution is a version-1 account's `org`,
+    else the name of the connection a version-2 account's `conn_id` names."""
+    found = None
+    for snap in reversed(cfg.find_simplefin_snapshots()):
+        try:
+            doc = json.loads(snap.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if isinstance(doc, dict) and _is_account_list(doc.get("accounts")):
+            found = snap
+            break
+    if found is None:
+        raise SystemExit("The bank feed has no snapshot yet: the next refresh fetches one (./ff refresh, while the "
+                         "dashboard runs), and ./ff init --feed connects a bank feed when none is.")
+    snap = found
     mapped = cfg.simplefin_map()  # sfid -> account_id
     connections = {c.get("conn_id"): c for c in doc.get("connections") or [] if isinstance(c, dict)}
     print(f"# SimpleFIN accounts in {snap.name}\n")
@@ -360,8 +432,10 @@ def list_accounts(cfg) -> None:
         tag = (f"{mapped[sfid]} (mapped)" if sfid in mapped
                else f"unmapped -> suggest: {_suggest(cfg, org, name)}")
         print(f"{sfid:<26}  {org:<16.16}  {name:<30.30}  {bal:>13}  {tag}")
-    print("\nAdd simplefin_id + simplefin_cutover to the matching accounts in "
-          "config/accounts.yaml, then run `make ingest`.")
+    print("\nAn unmapped account: ./ff init --feed asks which of your accounts it is and adds it to "
+          "config/accounts.yaml; or put its id in that account's simplefin_id (with a simplefin_cutover when the "
+          "account has statement files; an old id moves to simplefin_id_history), then ./ff validate and "
+          "./ff refresh.")
 
 
 def _suggest(cfg, org: str, name: str) -> str:

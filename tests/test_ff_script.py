@@ -151,8 +151,8 @@ def _etl_argv(home: Path, *args: str, network: str = "none", image: str = DEFAUL
     extra = ["-v", f"{answers}:/run/ff-answers.yaml:ro"] if answers else []
     return ["run", "--rm", "-i", "--user", "1000:1000", "--network", network, "-v", f"{home}:/ff:{mount}", *extra,
             "-w", workdir, "-e", "FF_HOME=/ff", "-e", f"FF_HOST_HOME={home}", "-e", "FF_IMAGE_ETL", "-e",
-            "FF_IMAGE_WEB", "-e", "FF_HOST_ADDRESSES", "-e", "FF_HOST_LISTENERS", "-e", "FF_STACK_PS", image, "python",
-            "-m", "etl", *args]
+            "FF_IMAGE_WEB", "-e", "FF_HOST_ADDRESSES", "-e", "FF_HOST_LISTENERS", "-e", "FF_STACK_PS", "-e", "FF_DEBUG",
+            image, "python", "-m", "etl", *args]
 
 
 # ------------------------------------------------------------------ the script itself
@@ -293,6 +293,24 @@ def test_init_has_a_network_only_to_connect_a_bank_feed_and_its_answers_file_is_
     assert rig.runs() == [_etl_argv(rig.home, "init", "--offline")]
 
 
+def test_init_feed_always_has_the_network(rig):
+    assert rig.run("init", "--feed").returncode == 0
+    assert rig.runs() == [_etl_argv(rig.home, "init", "--feed", network="bridge")]
+    files = rig.tmp / "files.yaml"
+    files.write_text("household: {}\n")
+    assert rig.run("init", "--feed", "--answers", str(files), "--force").returncode == 0
+    assert rig.runs() == [_etl_argv(rig.home, "init", "--answers", "/run/ff-answers.yaml", "--feed", "--force",
+                                    network="bridge", answers=files)]
+
+
+def test_simplefin_list_accounts_runs_offline_on_a_read_only_install_and_nothing_else_is_taken(rig):
+    assert rig.run("simplefin", "list-accounts").returncode == 0
+    assert rig.runs() == [_etl_argv(rig.home, "simplefin", "list-accounts", mount="ro")]
+    for args in (("simplefin",), ("simplefin", "fetch"), ("simplefin", "claim", "--token", "x")):
+        r = rig.run(*args)
+        assert r.returncode == 2 and "simplefin takes list-accounts" in r.stderr and rig.runs() == []
+
+
 @pytest.mark.parametrize("args, network", [(("ai", "preview"), "none"), (("ai", "reset"), "none"),
                                            (("ai", "run"), "bridge"), (("ai", "run", "--refresh"), "bridge")])
 def test_the_ai_commands_have_a_network_only_to_run_the_ai_step(rig, args, network):
@@ -309,7 +327,7 @@ def test_ai_refuses_what_it_does_not_take(rig, args):
 
 @pytest.mark.parametrize("args, said", [(("--answers",), "--answers needs the answers file"),
                                         (("--answers", "nowhere.yaml"), "there is no answers file at nowhere.yaml"),
-                                        (("--token", "x"), "init takes --answers FILE and --force")])
+                                        (("--token", "x"), "init takes --answers FILE, --force and --feed")])
 def test_init_refuses_what_it_does_not_take(rig, args, said):
     r = rig.run("init", *args)
     assert r.returncode == 2 and said in r.stderr and rig.runs() == []
@@ -389,6 +407,14 @@ def test_cdpath_never_moves_the_install_directory(rig):
     decoy.mkdir(parents=True)
     assert rig.run("validate", cwd=rig.tmp, FF_HOME="install", CDPATH=str(rig.tmp / "decoy")).returncode == 0
     assert rig.runs()[0][rig.runs()[0].index("-v") + 1] == f"{rig.home}:/ff:ro"
+
+
+def test_ff_debug_reaches_the_image_by_name_only(rig):
+    """FF_DEBUG=1 lets an unexpected error's traceback through (etl/__main__.py): it is passed by name, so its value
+    comes from the environment and is never part of the command line."""
+    rig.run("validate", FF_DEBUG="1")
+    argv = rig.runs()[0]
+    assert argv[argv.index("FF_DEBUG") - 1] == "-e" and "FF_DEBUG=1" not in argv
 
 
 def test_a_terminal_is_asked_for_only_when_stdin_is_one(rig):

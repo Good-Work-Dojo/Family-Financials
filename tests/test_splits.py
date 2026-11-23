@@ -508,14 +508,15 @@ def test_an_explicit_needs_review_false_from_an_override_survives_the_unsplit(tm
 
 def test_an_explicit_needs_review_false_from_a_stored_answer_survives_the_unsplit(tmp_path):
     """The dashboard editor stored `{needs_review: false}` against this uid before the split
-    rule existed; an override then retypes the row, and the stored answer still stands."""
+    rule existed; an override then retypes the row, and the stored answer's flag still stands (its category gives way
+    to the new type's: the override names none, so the transfer is filed Internal)."""
     parent_uid = raw().uid
     answer = {"key": f"txn:{parent_uid}", "scope": "txn", "txn_id": parent_uid, "answered_at": "2026-07-02T00:00:00Z",
               "set": {"category": "Dining", "subcategory": "Restaurants", "needs_review": False}}
     retype = [{"match": {"uid": parent_uid}, "set": {"type": "transfer"}}]
     p, ctl = unsplit_vs_control(tmp_path, answers_=[answer], overrides_=retype)
     assert [t.uid for t in p.txns] == [parent_uid] and "splits.unsplit" in {c.name for c in p.checks}
-    assert (ctl.txns[0].needs_review, ctl.txns[0].category) == (False, "Dining")
+    assert (ctl.txns[0].needs_review, ctl.txns[0].category) == (False, "Internal")
     assert [getattr(p.txns[0], k) for k in ROW_KEYS] == [getattr(ctl.txns[0], k) for k in ROW_KEYS]
 
 
@@ -567,7 +568,8 @@ def test_a_split_purchase_counts_once_in_every_total(tmp_path, capsys):
     assert json.loads((out / "recurring.json").read_text())["items"] == []
     p.print_summary()
     text = capsys.readouterr().out
-    assert "transactions: 4 (2 split parts of 1 purchase)" in text and "FAIL" not in text
+    # the manifest's count (a split purchase counted once), and what the split made of it
+    assert "transactions: 3 (1 purchase split into 2 parts)" in text and "FAIL" not in text
 
 
 def test_ledger_drift_counts_a_split_purchase_once_through_the_pipeline(tmp_path):
@@ -598,7 +600,7 @@ def test_print_summary_counts_a_dated_split_purchase_once_in_the_year_spend_and_
     assert "2025 spending (partial year): $350.00" in text                     # the parent on top would read $650.00
     top = text.split("top vendors:\n", 1)[1].splitlines()
     assert [ln.split() for ln in top if ln.strip()] == [["$300.00", "Synth", "Split", "Co"], ["$50.00", "Zzyzx", "General"]]
-    assert "transactions: 4 (2 split parts of 1 purchase)" in text
+    assert "transactions: 3 (1 purchase split into 2 parts)" in text
 
 
 # ------------------------------------------------------------ answers and learning

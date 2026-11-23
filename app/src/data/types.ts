@@ -197,8 +197,8 @@ export interface RecurringItem {
   /** Schedule (etl/enrich/recurring.py promote): active, cadence set, enough occurrences
    *  (4 weekly/biweekly, else 3), confidence >= 0.7. Status is computed in lib/schedules.ts. */
   schedule: boolean;
-  /** the next three expected charge dates (ISO; the first is `next_expected`): a monthly bill on its day of the month,
-   *  else last_seen stepped by median_gap_days (etl/enrich/recurring.py) */
+  /** the next expected charge dates (ISO; the first is `next_expected`), three, or thirteen for a monthly item: a
+   *  monthly bill on its day of the month, else last_seen stepped by median_gap_days (etl/enrich/recurring.py) */
   expected_dates: string[];
   /** weekly 3 · biweekly 4 · monthly 6 · quarterly 14 · annual 21 */
   grace_days: number;
@@ -210,8 +210,7 @@ export interface RecurringItem {
 export interface QualityReport {
   files: {
     source_file: string; parser: string;
-    /** the registry account a statement file was read for; null for a bank-feed pull (one pull reports many accounts),
-     *  and for any file of an export older than schema 22 */
+    /** the registry account a statement file was read for; null for a bank-feed pull (one pull reports many accounts) */
     account: string | null;
     rows_total: number; rows_parsed: number;
     rows_skipped: number; skip_reasons: Record<string, number>;
@@ -255,10 +254,9 @@ export interface HouseholdPerson {
 /** household.yaml's name and zone and its members, config/assumptions.yaml `household:` and the ETL-derived
  *  margin_account */
 export interface Household {
-  /** the household's display name: household.yaml `name`, else its surname, else "Household"; "" for an export older
-   *  than this key (the header then shows no name) */
+  /** the household's display name: household.yaml `name`, else its surname, else "Household" ("" shows no name) */
   name: string;
-  /** household.yaml `timezone`, an IANA zone name; null only for an export older than this key */
+  /** household.yaml `timezone`, an IANA zone name (the ETL always writes one; null reads as the browser's own zone) */
   timezone: string | null;
   people: HouseholdPerson[];
   margin_apr: number | null;                    // fraction, e.g. 0.11; null when assumptions.yaml states none
@@ -334,13 +332,13 @@ export interface Assumptions {
   category_renames: CategoryRename[];
   /** the names the engine files rows under (etl/models.py RESERVED); lib/categories reads them from here */
   reserved: ReservedNames;
-  /** household.yaml net_worth: whether the snapshot counts credit cards (their rows are Other Debt). An export older
-   *  than this key never counted them. */
+  /** household.yaml net_worth: whether the snapshot counts credit cards (their rows are Other Debt) */
   net_worth: { include_credit_cards: boolean };
 }
 
 /** The category and subcategory names the engine itself files rows under, by role: every taxonomy holds them and no
- *  category rename moves them (etl/models.py RESERVED). An export older than this key reads as SHIPPED_RESERVED. */
+ *  category rename moves them (etl/models.py RESERVED); lib/categories.ts SHIPPED_RESERVED holds them as the starter
+ *  taxonomy ships them. */
 export interface ReservedNames {
   /** a purchase no rule places, and a P2P payment no rule names */
   fallback_category: string;
@@ -364,6 +362,11 @@ export interface ReservedNames {
  *  removed or renamed only in a major release. 1–22 = versions before 1.0; 23 = the 1.0
  *  baseline. */
 export const EXPECTED_SCHEMA_VERSION = 23;
+
+/** The oldest export schema this app reads (data/DataContext.tsx loadAppData). A key added after it gets its default in
+ *  the loader; an export older than it is not read at all (OlderExportsError): the reload notice stands until the next
+ *  refresh rewrites it. 23, the 1.0 baseline: no released image writes an older one. */
+export const MIN_SCHEMA_VERSION = 23;
 
 /** The 14 export files, in the order DataContext fetches them. schemas.ts's `_files`
  *  tripwire asserts this equals the keys of FILE_SCHEMAS (two independent lists). */
@@ -411,7 +414,7 @@ export interface AiStatus {
   preview: { vendors: number; withheld: { name: number; digits: number; address: number; length: number; seen: number } };
 }
 
-/** ai_status.json when it is missing or older than the export (schema 23; DataContext.loadAppData): no key stored, the
+/** ai_status.json when it could not be read (DataContext.loadAppData's placeholder): no key stored, the
  *  step not switched on, nothing run, filed or counted. The model is unknown (the ETL's default provider stands in for
  *  the provider); policy_version 0 is no version the household could have agreed to. */
 export const AI_STATUS_NONE: AiStatus = {
@@ -499,17 +502,17 @@ export interface AppData {
   /** split parents by id, for the register's regrouping */
   splitParents: Map<string, Transaction>;
   accounts: AccountMeta[];
-  /** accounts.json `manual_assets`, sorted by name ([] when the file is missing or older than the key) */
+  /** accounts.json `manual_assets`, sorted by name ([] when the file could not be read) */
   manualAssets: ManualAsset[];
   /** accounts.json `manual_overridden`: the accounts.yaml `manual_entries` items an asset entered in the app hides (one
    *  of the same id, which net worth counts instead), each `origin: "config"`, sorted by name ([] when none, or when the
-   *  file is missing or older than the key) */
+   *  file could not be read) */
   manualOverridden: ManualAsset[];
   /** the snapshots comparable with the newest (lib/comparableSnapshots.ts), oldest first, the newest last: the only
    *  ones any page reads */
   assets: AssetsTimeseries;
-  /** the earlier month ends left out of `assets` because not every account was reporting yet (none for an export from
-   *  before `missing` existed); only the Data page's caveats read them, listing each with what it misses */
+  /** the earlier month ends left out of `assets` because not every account was reporting yet; only the Data page's
+   *  caveats read them, listing each with what it misses */
   partialSnapshots: Snapshot[];
   holdings: Holding[];
   cashflow: CashflowMonth[];
@@ -523,6 +526,6 @@ export interface AppData {
   networthDaily: NetworthDaily;
   /** vendors.json rows (optional export: [] when missing; read by the Data page's learned-rules card) */
   vendors: VendorEntry[];
-  /** ai_status.json (an export older than it, or a missing file: AI_STATUS_NONE, nothing configured or switched on) */
+  /** ai_status.json (a file that could not be read: AI_STATUS_NONE, nothing configured or switched on) */
   aiStatus: AiStatus;
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import time
 
 import pytest
 from conftest import demo_config
@@ -118,6 +119,25 @@ def test_brokerage_option_trades_are_investment(tmp_path):
         ])])
     txns, *_ = sfp.parse_snapshot(snap, SFID_MAP, {BRK: "2030-05-01"}, meta, tz=TZ)
     assert [(t.type, t.is_internal) for t in txns] == [("investment", True)] * 3
+
+
+def test_a_long_brokerage_description_is_typed_from_its_first_characters_and_stored_whole(tmp_path):
+    """The wording patterns read a description's first registry.MAX_DESCRIPTION characters, so a 20,000-character one
+    is typed in well under a second; the description itself is stored whole, so the row's uid is the one its full text
+    gives."""
+    from etl.importers import registry
+    meta = {**META, BRK: {**META[BRK], "simplefin_cutover": "2030-05-01"}}
+    long = "Bought 2 ABCD " + "buy put " * 2500
+    snap = write_snapshot(tmp_path / "accounts-long.json", [
+        acct("SF-BRK", "Brokerage", "9000.00", org=hh.BROKER, txns=[
+            txn("l1", "2030-06-11", "-100.00", long),
+            txn("l2", "2030-06-12", "-100.00", "x" * registry.MAX_DESCRIPTION + " Bought 3 shares of SMPL")])])
+    started = time.monotonic()
+    txns, *_ = sfp.parse_snapshot(snap, SFID_MAP, {BRK: "2030-05-01"}, meta, tz=TZ)
+    assert time.monotonic() - started < 1.0
+    assert [t.description_raw for t in txns] == [long.strip(), "x" * registry.MAX_DESCRIPTION + " Bought 3 shares of SMPL"]
+    # the wording past the first characters is not read: the second row stays a purchase
+    assert [t.type for t in txns] == ["purchase", "purchase"]
 
 
 def test_brokerage_cashback_is_income_not_negative_spend(tmp_path):
@@ -452,6 +472,130 @@ def test_pipeline_inert_without_config(tmp_path):
     assert {(b.account_id, b.source) for b in p.balance_obs} == {(CHK, "csv")}
 
 
+# ------------------------------------------------- a stored answer the reader cannot read
+
+def _three_snapshots(cfg, middle: str) -> list[str]:
+    """Three stored answers, the middle one's text `middle`; the outer two each report the checking account with one
+    row and a balance. Returns their file names, oldest first."""
+    names = ["accounts-20260601T000000Z.json", "accounts-20260605T000000Z.json", "accounts-20260610T000000Z.json"]
+    d = cfg.simplefin_snapshots_dir
+    write_snapshot(d / names[0], [acct("SF-CHK", "Chk", "1000.00", bal_date="2026-06-01", txns=[
+        txn("t1", "2026-06-01", "-11.00", "SAMPLE FIRST")])])
+    (d / names[1]).write_text(middle)
+    write_snapshot(d / names[2], [acct("SF-CHK", "Chk", "1500.00", bal_date="2026-06-10", txns=[
+        txn("t3", "2026-06-09", "-33.00", "SAMPLE THIRD")])])
+    return names
+
+
+_GOOD = json.dumps({"accounts": [acct("SF-CHK", "Chk", "1200.00", bal_date="2026-06-05", txns=[
+    txn("t2", "2026-06-04", "-22.00", "SAMPLE SECOND")])]})
+
+
+@pytest.mark.parametrize("middle", [_GOOD[: len(_GOOD) // 2], "", "[]", '{"accounts": null}', '{"accounts": "x"}',
+                                    '{"accounts": {"id": "SF-CHK"}}'],
+                         ids=["truncated", "empty", "a-list", "accounts-null", "accounts-text", "accounts-object"])
+def test_a_stored_answer_the_reader_cannot_read_fails_its_own_check_and_the_others_are_read(tmp_path, middle):
+    """A stored answer cut short while it was written, or not laid out as the feed's answers are, adds nothing and
+    fails one check naming it in plain words; the answers before and after it are read, and the newest one is still
+    the current one (its balance is live)."""
+    cfg = _cfg_with_simplefin(tmp_path)
+    names = _three_snapshots(cfg, middle)
+    p = Pipeline(cfg)
+    p.windows = {}
+    p.parse_simplefin()
+    assert sorted(t.description_raw for t in p.txns) == ["SAMPLE FIRST", "SAMPLE THIRD"]
+    failed = [(c.name, c.detail) for c in p.checks if c.status == "fail"]
+    assert failed == [(f"simplefin.snapshot_unreadable.{names[1]}",
+                       f"Not read: the bank feed's stored answer {names[1]} is damaged or not laid out as the feed's "
+                       "answers are, so it adds nothing; the other stored answers are read. Remove that one file from "
+                       "the bank feed's store: the answers fetched before and after it overlap it, so they keep most "
+                       "of its days.")]
+    assert p.simplefin_live_accounts == {CHK} and p.simplefin_latest_bal[CHK] == ("2026-06-10", 150000)
+    assert [s.source_file for s in p.file_stats] == [names[0], names[2]]
+    # the scan for the accounts the feed reports passes over the damaged answer too
+    assert p._feed_observed({CHK}) == {CHK}
+
+
+def test_the_newest_answer_unreadable_leaves_the_one_before_it_current(tmp_path):
+    cfg = _cfg_with_simplefin(tmp_path)
+    d = cfg.simplefin_snapshots_dir
+    write_snapshot(d / "accounts-20260601T000000Z.json", [acct("SF-BRK", "Brokerage", "10000.00", holdings=[
+        {"id": "h1", "symbol": "DEMO1", "description": "Demo Total Market", "shares": "10", "cost_basis": "1000.00",
+         "market_value": "2000.00"}])])
+    (d / "accounts-20260610T000000Z.json").write_text('{"accounts": [')
+    p = Pipeline(cfg)
+    p.windows = {}
+    p.parse_simplefin()
+    assert p.simplefin_live_accounts == {BRK} and [h.symbol for h in p.holdings] == ["DEMO1"]
+    assert [c.name for c in p.checks if c.status == "fail"] == [
+        "simplefin.snapshot_unreadable.accounts-20260610T000000Z.json"]
+    # how old the data is: the newest answer read, not the newest file's name
+    assert p.last_fetch(cfg.find_simplefin_snapshots()) == "2026-06-01T00:00:00Z"
+    (d / "accounts-20260610T000000Z.json").unlink()
+    write_snapshot(d / "accounts-20260610T000000Z.json", [acct("SF-BRK", "Brokerage", "10000.00")])
+    p = Pipeline(cfg)
+    p.windows = {}
+    p.parse_simplefin()
+    assert p.last_fetch(cfg.find_simplefin_snapshots()) == "2026-06-10T00:00:00Z"
+
+
+def _probe(**changes) -> dict:
+    """The middle answer's checking account, with one row, its fields changed by `changes` (`row` the row's)"""
+    row = {**txn("t2", "2026-06-04", "-22.00", "SAMPLE SECOND"), **changes.pop("row", {})}
+    return {**acct("SF-CHK", "Chk", "1200.00", bal_date="2026-06-05", txns=[row]), **changes}
+
+
+# each probe: the middle answer's accounts, the check it raises (None for none) and whether its row is read
+PROBES = {
+    "posted-text": ([_probe(row={"posted": "x"})], f"simplefin.bad_date.{CHK}", False),
+    "posted-float-text": ([_probe(row={"posted": str(float(epoch("2026-06-04")))})], None, True),
+    "balance-date-text": ([_probe(**{"balance-date": "x"})], f"simplefin.bad_balance_date.{CHK}", True),
+    "balance-date-past-any-year": ([_probe(**{"balance-date": 99999999999999})],
+                                   f"simplefin.bad_balance_date.{CHK}", True),
+    "row-extra-text": ([_probe(row={"extra": "x"})], None, True),
+    "unmapped-org-text": ([_probe(), {"id": "SF-OTHER", "name": "Other", "org": "Bank", "balance": "1.00"}],
+                          "simplefin.unmapped.SF-OTHER", True),
+    "amount-a-list": ([_probe(row={"amount": [1]})], f"simplefin.bad_amount.{CHK}", False),
+    "amount-infinite": ([_probe(row={"amount": float("inf")})], f"simplefin.bad_amount.{CHK}", False),
+    "amount-twenty-digits": ([_probe(row={"amount": "99999999999999999999.00"})], f"simplefin.bad_amount.{CHK}", False),
+    "description-a-number": ([_probe(row={"description": 7})], None, True),
+    "row-not-an-object": ([_probe(transactions=[txn("t2", "2026-06-04", "-22.00", "SAMPLE SECOND"), "x"])],
+                          f"simplefin.bad_row.{CHK}", True),
+    "transactions-text": ([_probe(transactions="x")], f"simplefin.bad_row.{CHK}", False),
+    "transactions-null": ([_probe(transactions=None)], None, False),
+    "holding-not-an-object": ([_probe(holdings=["x"])], f"simplefin.bad_row.{CHK}", True),
+    "account-not-an-object": ([_probe(), "x"], "simplefin.bad_account.accounts-20260605T000000Z.json", True),
+    "account-id-a-list": ([_probe(), {"id": ["SF-CHK"], "balance": "1.00"}],
+                          "simplefin.bad_account.accounts-20260605T000000Z.json", True),
+}
+
+
+@pytest.mark.parametrize("probe", list(PROBES))
+def test_an_account_or_row_of_the_wrong_shape_is_skipped_with_a_warning_and_the_rest_read(tmp_path, probe):
+    accounts, check, row_read = PROBES[probe]
+    cfg = _cfg_with_simplefin(tmp_path)
+    _three_snapshots(cfg, json.dumps({"accounts": accounts}))
+    p = Pipeline(cfg)
+    p.windows = {}
+    p.parse_simplefin()
+    rows = sorted(p.txns, key=lambda t: t.date)
+    assert rows[0].description_raw == "SAMPLE FIRST" and rows[-1].description_raw == "SAMPLE THIRD"
+    assert [t.description_raw for t in rows[1:-1]] == ([{"description-a-number": "7"}.get(probe, "SAMPLE SECOND")]
+                                                      if row_read else [])
+    assert [c.name for c in p.checks if c.status == "fail"] == []
+    raised = [c.name for c in p.checks if c.status == "warn" and not c.name.startswith(("simplefin.stale.",
+                                                                                        "simplefin.cutover_"))]
+    assert raised == ([check] if check else [])
+
+
+@pytest.mark.parametrize("epoch_value,expected", [
+    (1_900_000_000, "2030-03-17"), ("1900000000", "2030-03-17"), ("1900000000.0", "2030-03-17"),
+    (1_900_000_000.7, "2030-03-17"), (0, None), ("", None), (None, None), ("x", None), (True, None), ([1], None),
+    (99_999_999_999_999, None), (float("nan"), None), (float("inf"), None), ("1e400", None)])
+def test_an_epoch_is_read_from_a_number_or_numeric_text_and_anything_else_is_no_date(epoch_value, expected):
+    assert sfp._iso(epoch_value, dt.timezone.utc) == expected
+
+
 # --------------------------------------------------------------- fetch module
 
 class FakeCfg:
@@ -555,11 +699,19 @@ def test_request_does_not_retry_permanent_auth_failure(monkeypatch):
     assert "403" in str(ei.value)
 
 
-def test_request_retries_server_error_and_rate_limit(monkeypatch):
-    for code in (429, 503):
+def test_request_retries_a_server_error(monkeypatch):
+    for code in (500, 503):
         attempts = _urlopen_script(monkeypatch, [_http_error(code), b"{}"])
         assert sf._request("https://u:p@host/simplefin/accounts") == b"{}"
         assert len(attempts) == 2, code
+
+
+def test_request_does_not_retry_a_rate_limit(monkeypatch):
+    """A 429 spends no more of the day's request budget: the next scheduled refresh asks again."""
+    attempts = _urlopen_script(monkeypatch, [_http_error(429), b"{}"])
+    with pytest.raises(SystemExit) as ei:
+        sf._request("https://u:p@host/simplefin/accounts")
+    assert len(attempts) == 1 and "429" in str(ei.value)
 
 
 def test_claim_post_is_never_retried(monkeypatch):

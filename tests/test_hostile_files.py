@@ -16,7 +16,7 @@ called, and never read by the test either: `truncate` gives it its size without 
 the glob matches; 50,000 rows (read in a few seconds); one line of 2 MB; descriptions that start with = + - @, hold
 HTML and script tags, control characters, 10,000 characters, right-to-left and combining characters, bidirectional
 controls and invisible format characters; dates in 1900 and 2999 and one that is no calendar day; amounts of 0, 0.001,
-a billion, 1e9 and with currency signs.
+a billion, twenty digits, 1e9 and with currency signs.
 
 A description is data: stored as the file has it after the format's own whitespace squash, formula-leading characters
 and HTML included (the dashboard escapes what it shows). The three native formats store a description with only its
@@ -681,6 +681,14 @@ def _billion(fmt: Format, path: Path) -> Expect:
     row = Row(date(2030, 3, 20), -1_000_000_000_00, "SAMPLE BIG SPEND")
     _amount(fmt, path, row)
     return read([*BASE, row])
+
+
+@hostile("amount-of-twenty-digits")
+def _twenty_digits(fmt: Format, path: Path) -> Expect:
+    """An amount past 10^17 cents is no amount any ledger holds (and SQLite cannot store it): its row is skipped as
+    unreadable in every format, and the rest of the file is read"""
+    _amount(fmt, path, Row(date(2030, 3, 20), -1, "SAMPLE HUGE SPEND", text="99999999999999999999.00"))
+    return skipped(BASE, "unparseable-row")
 
 
 @hostile("amount-written-1e9")

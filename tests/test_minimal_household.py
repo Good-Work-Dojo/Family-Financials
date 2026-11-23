@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import ROOT
+from conftest import ROOT, hold_lock
 
 from etl import pipeline
-from etl.__main__ import main
+from etl.__main__ import main, run_command
 from etl.config import Config
 from etl.exports import PROJECTION_DEFAULTS, SCHEMA_VERSION, export_projections
 from etl.models import RESERVED, RESERVED_TAXONOMY
@@ -181,6 +181,75 @@ def test_a_second_run_is_identical_but_for_the_generation_stamp(home):
     for files in (first, second):
         files["manifest.json"].pop("generated_at")
     assert first == second
+
+
+def test_a_file_two_accounts_match_is_read_for_the_first_only_and_fails_a_check_for_the_other(
+        home, monkeypatch, capsys):
+    """A second checking account whose pattern also matches the first one's export: the file is read once, for the
+    account listed first, so the rows and the spending are not doubled; the second account fails one check naming the
+    file and the account that reads it, and validate says so in a note without refusing the config."""
+    path = home / "config" / "accounts.yaml"
+    doc = yaml.safe_load(path.read_text("utf-8"))
+    doc["accounts"]["demo_checking_1111"] = {
+        "name": "Second Checking", "institution": "Sample Bank", "owner": "Alex", "kind": "checking",
+        "parser": "chase_checking", "glob": "demo_checking_*.csv"}
+    path.write_text(yaml.safe_dump(doc, sort_keys=False), "utf-8")
+    assert cli(monkeypatch, "validate") == 0
+    assert capsys.readouterr().out == (
+        "config OK (2 files, 2 accounts)\n"
+        "accounts.yaml: accounts.demo_checking_1111: 1 statement file its pattern matches is read for "
+        "demo_checking_0000, the account listed before it: demo_checking_0000-2025-01.csv — give each account a file "
+        "pattern that matches only its own files\n")
+    assert pipeline.run() == 0
+    files = exported(home)
+    assert files["manifest.json"]["transaction_count"] == 15
+    assert {t["account"] for t in files["transactions.json"]["transactions"]} == {ACCOUNT}
+    fails = [(c["name"], c["detail"]) for c in files["quality_report.json"]["checks"] if c["status"] == "fail"]
+    assert fails == [("import.matched_by_accounts.demo_checking_1111",
+                      "1 file this account's file pattern matches is read for another account: "
+                      "demo_checking_0000-2025-01.csv (Sample Checking). A statement file is read for one account "
+                      "only, the first listed whose pattern matches it and whose format reads it, so this account "
+                      "leaves it out: give each account a file pattern that matches only its own files (accounts.yaml "
+                      "glob).")]
+
+
+def test_an_unexpected_error_is_one_plain_line_naming_where_its_details_are(home, monkeypatch, capsys):
+    """A failure no check foresaw reaches the person as one line on stderr, never a traceback: the command, the
+    error's kind and the file holding the details (written private to the owner); FF_DEBUG=1 lets the error itself
+    through, traceback and all"""
+    def broken(self):
+        raise ValueError("SAMPLE FAILURE 0000")
+    monkeypatch.setattr(pipeline.Pipeline, "enrich", broken)
+    monkeypatch.setattr(sys, "argv", ["etl", "ingest"])
+    monkeypatch.delenv("FF_DEBUG", raising=False)
+    assert run_command() == 1
+    details = home / "data" / "last-error.txt"
+    printed = capsys.readouterr()
+    assert printed.err == (f"etl ingest: stopped by an unexpected error (ValueError). The details are in {details}. "
+                           "They may name your data (an account, a file, a transaction): read them before you share "
+                           "them in a report.\n")
+    assert "Traceback" not in printed.out + printed.err
+    assert "SAMPLE FAILURE 0000" in details.read_text("utf-8") and details.stat().st_mode & 0o777 == 0o600
+    monkeypatch.setenv("FF_DEBUG", "1")
+    with pytest.raises(ValueError, match="SAMPLE FAILURE 0000"):
+        run_command()
+
+
+def test_an_ingest_another_one_holds_off_is_one_plain_line(home, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline, "INGEST_LOCK_WAIT_S", 0)
+    monkeypatch.setattr(sys, "argv", ["etl", "ingest"])
+    lock = home / "data" / ".ingest.lock"
+    lock.parent.mkdir()
+    holder = hold_lock(lock)
+    try:
+        assert run_command() == 1
+    finally:
+        holder.kill()
+        holder.wait()
+    assert capsys.readouterr().err == (
+        "etl ingest: another ingest is running, so this one did not start (two at once would damage the "
+        "database): try again when it ends.\n")
+    assert not (home / "data" / "last-error.txt").exists()
 
 
 def test_the_starter_rule_files_beside_it_validate_and_ingest_too(home, monkeypatch, capsys):

@@ -2,6 +2,7 @@
 # Additional terms: see NOTICE
 """Recurring detection: cadence bands, amount modes, price changes."""
 import json
+from calendar import monthrange
 from datetime import date, timedelta
 
 import pytest
@@ -9,14 +10,18 @@ from conftest import demo_config, make_txn
 
 from etl.enrich.recurring import (
     CONFIDENCE_FLOOR,
+    EXPECTED_DATES,
     FIRST_BUSINESS_DAY,
     FIRST_EXPECTED_MIN_DAYS,
     GRACE_DAYS,
     LAST_BUSINESS_DAY,
     MIN_OCCURRENCES,
+    MONTHLY_EXPECTED_DATES,
     annualized_cents,
     detect,
     expected_dates,
+    first_business_day,
+    last_business_day,
     monthly_dates,
     monthly_rule,
     promote,
@@ -128,7 +133,7 @@ def test_every_series_carries_the_schedule_fields_and_expected_dates_follow_next
     r = detect(rows, "2025-08-20")[0]
     # gaps 31,28,31,30,31,30,31 -> median 31; a bill on the 15th is expected on the 15th, not 31 days on
     assert r["median_gap_days"] == 31
-    assert r["expected_dates"] == ["2025-09-15", "2025-10-15", "2025-11-15"]
+    assert r["expected_dates"][:3] == ["2025-09-15", "2025-10-15", "2025-11-15"]
     assert r["expected_dates"][0] == r["next_expected"]
     assert r["grace_days"] == 6 and r["confidence"] == 1.0 and r["schedule"] is True
 
@@ -148,7 +153,7 @@ def test_a_bill_on_the_first_business_day_is_expected_on_the_next_months_first_b
     assert monthly_rule([date.fromisoformat(d) for d in
                          ("2026-02-02", "2026-03-02", "2026-04-01", "2026-05-01", "2026-06-01", "2026-07-01")]) \
         == FIRST_BUSINESS_DAY
-    assert r["expected_dates"] == ["2026-08-03", "2026-09-01", "2026-10-01"]
+    assert r["expected_dates"][:3] == ["2026-08-03", "2026-09-01", "2026-10-01"]
     assert r["next_expected"] == "2026-08-03"
     # a day count after the last payment (the median gap, 30 days) would read 31 July
     assert expected_dates(r["last_seen"], r["median_gap_days"])[0] == "2026-07-31"
@@ -157,12 +162,12 @@ def test_a_bill_on_the_first_business_day_is_expected_on_the_next_months_first_b
 def test_three_of_the_last_four_on_the_first_business_day_is_enough():
     # one payment a day late (Friday 2 January; the 1st was a Thursday), the other three on their first business day
     r = monthly(["2025-11-03", "2025-12-01", "2026-01-02", "2026-02-02", "2026-03-02", "2026-04-01"])
-    assert r["expected_dates"] == ["2026-05-01", "2026-06-01", "2026-07-01"]
+    assert r["expected_dates"][:3] == ["2026-05-01", "2026-06-01", "2026-07-01"]
     # a day count (the median gap, 30 days) would read 1 May, then 31 May and 30 June
     assert expected_dates(r["last_seen"], r["median_gap_days"]) == ["2026-05-01", "2026-05-31", "2026-06-30"]
     # two of the last four: not the business-day case (and the days wander, so no stable day either)
     two = monthly(["2026-01-05", "2026-02-02", "2026-03-04", "2026-04-01", "2026-05-04"])
-    assert two["expected_dates"] == expected_dates(two["last_seen"], two["median_gap_days"])
+    assert two["expected_dates"] == expected_dates(two["last_seen"], two["median_gap_days"], MONTHLY_EXPECTED_DATES)
     assert two["next_expected"] == "2026-06-02"
 
 
@@ -171,10 +176,10 @@ def test_the_first_expected_date_is_at_least_fifteen_days_after_the_last_payment
     # due on the 1st, paid the business day before a weekend 1st: 31 July pays August (1 August 2026 is a Saturday),
     # so the next payment is September's, not 3 August, which is already paid
     early = monthly(["2026-05-01", "2026-06-01", "2026-07-01", "2026-07-31"])
-    assert early["expected_dates"] == ["2026-09-01", "2026-10-01", "2026-11-02"]
+    assert early["expected_dates"][:3] == ["2026-09-01", "2026-10-01", "2026-11-02"]
     # a last-business-day bill whose October payment came on 2 November: November's is still expected on the 30th
     late = monthly(["2026-07-31", "2026-08-31", "2026-09-30", "2026-11-02"])
-    assert late["expected_dates"] == ["2026-11-30", "2026-12-31", "2027-01-29"]
+    assert late["expected_dates"][:3] == ["2026-11-30", "2026-12-31", "2027-01-29"]
     # the ordinary cases: the next month's date
     assert monthly_dates("2026-10-01", FIRST_BUSINESS_DAY)[0] == "2026-11-02"
     assert monthly_dates("2026-09-13", 15)[0] == "2026-10-15"
@@ -186,32 +191,32 @@ def test_a_payment_on_a_weekend_says_the_bill_is_no_business_day_bill():
     # 1 November, not Monday 2 November
     first = ["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01", "2026-10-01"]
     assert monthly_rule([date.fromisoformat(d) for d in first]) == 1
-    assert monthly(first)["expected_dates"] == ["2026-11-01", "2026-12-01", "2027-01-01"]
+    assert monthly(first)["expected_dates"][:3] == ["2026-11-01", "2026-12-01", "2027-01-01"]
     # one that posts on the month's last day (Sunday 31 May, Saturday 31 October): 31 January 2027 (a Sunday), not
     # the last business day, the 29th
     last = ["2026-05-31", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30", "2026-10-31"]
     assert monthly_rule([date.fromisoformat(d) for d in last]) == 31
-    assert monthly(last)["expected_dates"] == ["2026-11-30", "2026-12-31", "2027-01-31"]
+    assert monthly(last)["expected_dates"][:3] == ["2026-11-30", "2026-12-31", "2027-01-31"]
     # a genuine first-business-day bill (3 August for the Saturday 1st) still is one
     genuine = ["2026-06-01", "2026-07-01", "2026-08-03", "2026-09-01", "2026-10-01"]
     assert monthly_rule([date.fromisoformat(d) for d in genuine]) == FIRST_BUSINESS_DAY
-    assert monthly(genuine)["expected_dates"] == ["2026-11-02", "2026-12-01", "2027-01-01"]
+    assert monthly(genuine)["expected_dates"][:3] == ["2026-11-02", "2026-12-01", "2027-01-01"]
 
 
 def test_one_odd_payment_does_not_undo_a_stable_day():
     # a bill on the 15th paid once on the 18th: still the 15th, the odd payment left out of the median
     once = monthly(["2026-05-15", "2026-06-15", "2026-07-15", "2026-08-18", "2026-09-15", "2026-10-15"])
-    assert once["expected_dates"] == ["2026-11-15", "2026-12-15", "2027-01-15"]
+    assert once["expected_dates"][:3] == ["2026-11-15", "2026-12-15", "2027-01-15"]
     # the odd payment the latest one: still the 15th, and November's (at least fifteen days after the 18th)
     latest = monthly(["2026-05-15", "2026-06-15", "2026-07-15", "2026-08-15", "2026-09-15", "2026-10-18"])
-    assert latest["expected_dates"] == ["2026-11-15", "2026-12-15", "2027-01-15"]
+    assert latest["expected_dates"][:3] == ["2026-11-15", "2026-12-15", "2027-01-15"]
 
 
 def test_a_bill_that_moved_its_day_is_read_on_its_new_day():
     # from the 5th to the 20th three payments ago: the last three alone are a stable day
     moved = ["2026-04-05", "2026-05-05", "2026-06-05", "2026-07-05", "2026-08-20", "2026-09-20", "2026-10-20"]
     assert monthly_rule([date.fromisoformat(d) for d in moved]) == 20
-    assert monthly(moved)["expected_dates"] == ["2026-11-20", "2026-12-20", "2027-01-20"]
+    assert monthly(moved)["expected_dates"][:3] == ["2026-11-20", "2026-12-20", "2027-01-20"]
 
 
 def test_two_odd_payments_or_a_drifting_day_are_no_stable_day():
@@ -219,17 +224,17 @@ def test_two_odd_payments_or_a_drifting_day_are_no_stable_day():
     twice = ["2026-06-15", "2026-07-18", "2026-08-15", "2026-09-18", "2026-10-15"]
     assert monthly_rule([date.fromisoformat(d) for d in twice]) is None
     r = monthly(twice)
-    assert r["expected_dates"] == expected_dates(r["last_seen"], r["median_gap_days"])
+    assert r["expected_dates"] == expected_dates(r["last_seen"], r["median_gap_days"], MONTHLY_EXPECTED_DATES)
     # a day that drifts a day a month (1st, 2nd, 3rd, 4th, 5th) moved nowhere: the last three are near the one before
     drift = ["2026-06-01", "2026-07-02", "2026-08-03", "2026-09-04", "2026-10-05"]
     assert monthly_rule([date.fromisoformat(d) for d in drift]) is None
     d = monthly(drift)
-    assert d["expected_dates"] == expected_dates(d["last_seen"], d["median_gap_days"])
+    assert d["expected_dates"] == expected_dates(d["last_seen"], d["median_gap_days"], MONTHLY_EXPECTED_DATES)
 
 
 def test_a_bill_on_a_stable_day_is_expected_on_its_median_day():
     r = monthly(["2026-03-14", "2026-04-15", "2026-05-16", "2026-06-15"])
-    assert r["expected_dates"] == ["2026-07-15", "2026-08-15", "2026-09-15"]
+    assert r["expected_dates"][:3] == ["2026-07-15", "2026-08-15", "2026-09-15"]
     # the LAST six payments decide: a bill that moved from the 20th to the 2nd is read on the 2nd, not as irregular
     moved = monthly(["2025-04-20", "2025-05-20", "2025-06-20", "2025-07-20", "2025-08-20", "2025-09-02",
                      "2025-10-02", "2025-11-02", "2025-12-02", "2026-01-02", "2026-02-02", "2026-03-02"])
@@ -239,17 +244,17 @@ def test_a_bill_on_a_stable_day_is_expected_on_its_median_day():
 def test_an_anchor_past_a_short_months_end_is_that_months_last_day():
     # the 31st, paid on 30 November (its last day) and on a weekend 31st: not the last-business-day case
     r = monthly(["2025-10-31", "2025-11-30", "2025-12-31", "2026-01-31"])
-    assert r["expected_dates"] == ["2026-02-28", "2026-03-31", "2026-04-30"]
+    assert r["expected_dates"][:3] == ["2026-02-28", "2026-03-31", "2026-04-30"]
     # a February in between: 28 February and 30 April are the 31st clamped, so the anchor stays the 31st
     between = monthly(["2025-12-31", "2026-01-31", "2026-02-28", "2026-03-31", "2026-04-30"])
-    assert between["expected_dates"] == ["2026-05-31", "2026-06-30", "2026-07-31"]
+    assert between["expected_dates"][:3] == ["2026-05-31", "2026-06-30", "2026-07-31"]
     # a leap year's February has a 29th
     assert monthly_dates("2028-01-31", 31) == ["2028-02-29", "2028-03-31", "2028-04-30"]
     # a bill on the 28th keeps the 28th, February's last day included
     assert monthly(["2026-01-28", "2026-02-28", "2026-03-28", "2026-04-28"])["next_expected"] == "2026-05-28"
     # and one on the 30th keeps the 30th, February's 28th and April's 30th read as the 30th
     on30 = monthly(["2026-01-30", "2026-02-28", "2026-03-30", "2026-04-30", "2026-05-30"])
-    assert on30["expected_dates"] == ["2026-06-30", "2026-07-30", "2026-08-30"]
+    assert on30["expected_dates"][:3] == ["2026-06-30", "2026-07-30", "2026-08-30"]
 
 
 def test_a_bill_on_the_last_business_day_is_expected_on_the_next_months_last_business_day():
@@ -258,7 +263,39 @@ def test_a_bill_on_the_last_business_day_is_expected_on_the_next_months_last_bus
     assert monthly_rule([date.fromisoformat(d) for d in
                          ("2026-04-30", "2026-05-29", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30")]) \
         == LAST_BUSINESS_DAY
-    assert r["expected_dates"] == ["2026-10-30", "2026-11-30", "2026-12-31"]
+    assert r["expected_dates"][:3] == ["2026-10-30", "2026-11-30", "2026-12-31"]
+
+
+def _consecutive_months(days: list[date]) -> bool:
+    return all((b.year * 12 + b.month) - (a.year * 12 + a.month) == 1 for a, b in zip(days, days[1:], strict=False))
+
+
+def test_a_monthly_series_exports_a_year_of_dates_each_on_its_rule():
+    # the dashboard's next-12-months views read the dates as they are: thirteen of them reach the twelfth month after
+    # the month in progress, so no date is stepped by the dashboard and none loses the rule
+    assert (EXPECTED_DATES, MONTHLY_EXPECTED_DATES) == (3, 13)
+    lbd = monthly(["2026-04-30", "2026-05-29", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30"])
+    days = [date.fromisoformat(d) for d in lbd["expected_dates"]]
+    assert len(days) == MONTHLY_EXPECTED_DATES and _consecutive_months(days)
+    assert all(d == last_business_day(d.year, d.month) and d.weekday() < 5 for d in days)
+    # the month ends a day count would put on a weekend: 28 February 2027 is a Sunday, 31 July 2027 a Saturday
+    assert "2027-02-26" in lbd["expected_dates"] and "2027-07-30" in lbd["expected_dates"]
+    fbd = monthly(["2026-02-02", "2026-03-02", "2026-04-01", "2026-05-01", "2026-06-01", "2026-07-01"])
+    days = [date.fromisoformat(d) for d in fbd["expected_dates"]]
+    assert len(days) == MONTHLY_EXPECTED_DATES and _consecutive_months(days)
+    assert all(d == first_business_day(d.year, d.month) for d in days)
+    # a stable 31st: each month's 31st, clamped to a shorter month's last day (29 February 2028 a leap day)
+    on31 = monthly(["2026-10-31", "2026-11-30", "2026-12-31", "2027-01-31"])
+    days = [date.fromisoformat(d) for d in on31["expected_dates"]]
+    assert len(days) == MONTHLY_EXPECTED_DATES and _consecutive_months(days)
+    assert all(d.day == min(31, monthrange(d.year, d.month)[1]) for d in days)
+    assert "2028-02-29" in on31["expected_dates"]
+
+
+def test_every_other_cadence_exports_three_dates():
+    weekly = detect([tx(d, "Vendor", -4999) for d in
+                     ["2026-01-02", "2026-01-09", "2026-01-16", "2026-01-23", "2026-01-30"]], "2026-01-30")
+    assert [len(r["expected_dates"]) for r in weekly] == [EXPECTED_DATES]
 
 
 def test_the_month_end_wrap_is_no_stable_day():
@@ -274,7 +311,8 @@ def test_an_irregular_monthly_bill_keeps_the_interval_after_its_last_payment():
     r = monthly(dates)
     assert monthly_rule([date.fromisoformat(d) for d in dates]) is None
     assert r["median_gap_days"] == 31
-    assert r["expected_dates"] == expected_dates("2026-07-09", 31) == ["2026-08-09", "2026-09-09", "2026-10-10"]
+    assert r["expected_dates"] == expected_dates("2026-07-09", 31, MONTHLY_EXPECTED_DATES)
+    assert r["expected_dates"][:3] == ["2026-08-09", "2026-09-09", "2026-10-10"]
 
 
 @pytest.mark.parametrize("cadence,dates", [
@@ -440,7 +478,8 @@ def test_recurring_json_carries_exactly_the_five_schedule_keys_and_no_cents_keys
                        "last_amount", "annualized", "monthly_equivalent", "price_changes",
                        "schedule", "expected_dates", "grace_days", "confidence", "median_gap_days"}
     assert it["schedule"] is True
-    assert it["expected_dates"] == ["2025-09-15", "2025-10-15", "2025-11-15"]
+    assert it["expected_dates"] == [f"{2025 + (8 + k) // 12}-{(8 + k) % 12 + 1:02d}-15" for k in range(MONTHLY_EXPECTED_DATES)]
+    assert it["expected_dates"][:3] == ["2025-09-15", "2025-10-15", "2025-11-15"]
     assert it["monthly_equivalent"] == it["typical_amount"] and it["annualized"] == 185.88   # a monthly item's own amount
     assert it["grace_days"] == 6 and isinstance(it["grace_days"], int)
     assert it["median_gap_days"] == 31 and isinstance(it["median_gap_days"], int)

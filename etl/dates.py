@@ -62,16 +62,14 @@ def days_between(a: str, b: str) -> int | None:
 
 
 def business_days_between(a: str, b: str) -> int:
-    """Inclusive-exclusive count of business days between ISO dates (abs)."""
+    """Inclusive-exclusive count of business days between ISO dates (abs): the weekdays after the earlier date up to
+    and including the later. Counted in constant time, whatever the span: five per whole week, then the weekdays among
+    the few days left over (the generic transfer matcher asks this for every open pair across the whole history)."""
     d1 = dt.date.fromisoformat(min(a, b))
     d2 = dt.date.fromisoformat(max(a, b))
-    days = 0
-    cur = d1
-    while cur < d2:
-        cur += dt.timedelta(days=1)
-        if cur.weekday() < 5:
-            days += 1
-    return days
+    weeks, rest = divmod((d2 - d1).days, 7)
+    start = d1.weekday()
+    return weeks * 5 + sum((start + i) % 7 < 5 for i in range(1, rest + 1))
 
 
 def month_of(iso_date: str) -> str:

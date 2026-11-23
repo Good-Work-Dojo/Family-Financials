@@ -7,6 +7,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useData } from "../data/DataContext";
 import type { Transaction } from "../data/types";
+import { INCOME_TYPES } from "../lib/agg";
 import { type AnswerSet, MAX_ANSWERS } from "../lib/answers";
 import { useVocab } from "../lib/useVocab";
 import { type AnswerScope, defaultScope, learnIndex, offeredVendor, vendorLearnable } from "../lib/vendorScope";
@@ -14,7 +15,6 @@ import { TagInput } from "./inputs";
 import { Code } from "./NoData";
 import { pillCls, TAP_AREA } from "./ui";
 
-const INCOME_TYPES = new Set(["income", "dividend", "interest"]);
 /** the row types an answer can categorize — the one set the register's Edit button and its selection
  *  checkboxes both read (TxnTable), so a type is selectable exactly when the editor can answer it */
 export const EDITABLE_TYPES: ReadonlySet<string> = new Set(["purchase", "fee", "income"]);

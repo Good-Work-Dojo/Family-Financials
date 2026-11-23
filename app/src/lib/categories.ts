@@ -4,8 +4,8 @@
 //
 // Two kinds of name. The names the engine itself files rows under - the fallback category with its
 // uncategorized and P2P-unknown subcategories, the internal, income and fees categories - come from the data
-// (assumptions.reserved, etl/models.py RESERVED); SHIPPED_RESERVED is what an older export without them reads
-// as. Every other name below is the one starter/category_rules.yaml ships. A category rename (`renames:` in a
+// (assumptions.reserved, etl/models.py RESERVED); SHIPPED_RESERVED holds them as the starter taxonomy ships them.
+// Every other name below is the one starter/category_rules.yaml ships. A category rename (`renames:` in a
 // household's category_rules.yaml, exported as assumptions.category_renames) moves the references the ETL
 // rewrites - answers, overrides, learned rules - but not these literals, so `categoryVocab(assumptions)` answers
 // every question about them in the CURRENT spelling: a rename of Transport can never silently drop it from the
@@ -62,7 +62,7 @@ const SHIPPED_CATEGORIES: ReadonlySet<string> = new Set(Object.keys(SHIPPED_TAXO
 const SHIPPED_SUBS: ReadonlySet<string> = new Set(Object.values(SHIPPED_TAXONOMY).flat());
 
 /** The names the engine files rows under as starter/category_rules.yaml ships them (etl/models.py RESERVED): the
- *  default an export without assumptions.reserved is read with (data/DataContext.tsx loadAppData). */
+ *  reserved block of a household that renames none of them (the test fixtures' default). */
 export const SHIPPED_RESERVED: Readonly<ReservedNames> = Object.freeze({
   fallback_category: "Cash & Misc", uncategorized_sub: "Uncategorized", p2p_unknown_sub: "Venmo/Zelle Unknown",
   internal_category: "Internal", income_category: "Income", income_other_sub: "Other", fees_category: "Fees & Interest",
@@ -109,16 +109,6 @@ function reservedLists(r: ReservedNames) {
   const marginInterest: Pair = [r.fees_category, MARGIN_INTEREST_SUB];
   return { pile, p2pUnknown, moneyMovement, essentialCategories, marginInterest, passiveIncome: passiveIncomePairs(r) };
 }
-
-const SHIPPED_LISTS = reservedLists(SHIPPED_RESERVED);
-/** Every shipped name the class lists above are written against (under the shipped reserved names), so a test can
- *  check each one is in SHIPPED_TAXONOMY (a new class list is added here too). */
-export const VOCABULARY_NAMES: { readonly categories: readonly string[]; readonly pairs: readonly Pair[] } = {
-  categories: [SHIPPED_RESERVED.fallback_category, SHIPPED_RESERVED.internal_category, SHIPPED_RESERVED.income_category,
-    ...SHIPPED_LISTS.essentialCategories, ...SUBSCRIPTION_LIKE],
-  pairs: [...ESSENTIAL_PAIRS, ...SHIPPED_LISTS.pile, SHIPPED_LISTS.p2pUnknown, ...SHIPPED_LISTS.moneyMovement,
-    SHIPPED_LISTS.marginInterest, ...Object.values(SHIPPED_LISTS.passiveIncome)],
-};
 
 // ---- the vocabulary ----
 

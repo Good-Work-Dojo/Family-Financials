@@ -157,7 +157,9 @@ gateway's path or model can choose the company that receives the names (never th
 `%` percent-encoded in a field). One longer than `SCOPE_MAX` keeps `|<accounts>` and has the rest cut to fit, ended by
 `~` and the first `SCOPE_HASH` (12) hex digits of the SHA-256 of the uncut rest. `cache.consent` is `on` only for
 `enabled` true, `consent_policy == POLICY_VERSION` and `consent_scope` equal to the current scope; `stale` for another
-whole number or another scope; `off` otherwise; a run also needs a key. So a household.yaml edit to `ai.provider`,
+whole number or another scope; `off` otherwise; a run also needs a key. A run reads it twice: before it takes the lock,
+and again just before it logs the run and sends, after the offline pass that reads the household's data, so a switch
+turned off meanwhile sends nothing (exit 0, "Nothing was sent", no run counted). So a household.yaml edit to `ai.provider`,
 `ai.base_url` or `ai.accounts` (or to `ai.model` with a `base_url`) turns the step off until the family agrees
 again, and the card shows it as `stale` (`aiCard.ts` `agreed`). `ai` is one of the prefs sections a tab writes
 whole (`KEPT_WHOLE_KEYS`), so a tab from an older bundle cannot erase or half-write it. The card's Turn on writes the

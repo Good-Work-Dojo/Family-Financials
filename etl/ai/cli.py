@@ -262,6 +262,13 @@ def _run_held(cfg, providers, key: str, where, store: Path, *, refresh: bool, fr
     except ValueError:
         out("AI step: a name that may not be sent reached the request. Nothing was sent.")
         return 1
+    # the household's data took a while to read: the switch is read again just before anything leaves, so a family
+    # member who switched the step off meanwhile is heard (and no run is counted)
+    state = cache.consent(prefs_path(cfg), policy_mod.POLICY_VERSION, policy_mod.consent_scope(ai))
+    if state != "on":
+        if not from_refresh:
+            out(OFF_WORDS[state])
+        return 0
     record = {"time": cache.stamp(now), "provider": ai.provider, "model": ai.model,
               "policy": policy_mod.POLICY_VERSION, "outcome": "asked", "sent": len(chosen), "answered": 0,
               "dropped": {}, "cached": 0, "vendors": list(chosen)}

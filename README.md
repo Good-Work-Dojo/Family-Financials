@@ -72,14 +72,16 @@ invented demo household and start the dashboard:
 
 ```sh
 mkdir ~/ff-demo && cd ~/ff-demo
-curl -fsSL -o ff https://raw.githubusercontent.com/Good-Work-Dojo/Family-Financials/v1.0.0/ff && chmod 755 ff
+curl -fsSL -o ff https://raw.githubusercontent.com/Good-Work-Dojo/Family-Financials/v1.0.1/ff && chmod 755 ff
 ./ff demo        # generates the demo household and prints its passcode once
 ./ff up          # starts the dashboard and prints the address to open
 ```
 
 Open the address `./ff up` prints (`http://127.0.0.1:8080` unless you changed it): it takes you to the sign-in page,
 `/login`, where you sign in with the passcode `./ff demo` printed. `./ff demo` and `./ff up` download the two images from the GitHub Container Registry the first
-time. `./ff down` stops the dashboard and keeps every file.
+time. `./ff down` stops the dashboard and keeps every file. The two warnings its ingest prints are part of the demo: an
+account the bank feed stopped reporting, and a bank feed account no account of the household maps, as the Data page
+shows them.
 
 If port 8080 is taken, `./ff up` says so: set `FF_PORT` to a free port in the `.env` file `./ff demo` wrote, then run
 `./ff up` again. Lost the passcode? `./ff passcode add demo` sets a new one.
@@ -99,7 +101,7 @@ mkdir ~/ff-demo && cp ff ~/ff-demo/ && cd ~/ff-demo
 ```
 
 `./ff build` tags the images with the names and the version `ff` runs by default
-(`ghcr.io/good-work-dojo/family-financials-etl:1.0.0` and `…-web:1.0.0`), so the install uses them and downloads
+(`ghcr.io/good-work-dojo/family-financials-etl:1.0.1` and `…-web:1.0.1`), so the install uses them and downloads
 nothing. A copy of the source unpacked from an archive works the same way. To upgrade a locally built install, see
 [Backup, restore and upgrade](#backup-restore-and-upgrade).
 
@@ -118,8 +120,9 @@ with `ff` in it, as above. Then:
 your home network and on which port, a SimpleFIN setup token (now or later), which account each statement file
 already in `imports/` belongs to, and a passcode. It writes `config/household.yaml`, `config/accounts.yaml`, the
 starter rule files, `.env` and `compose.yaml`, then checks the config. Every step is kept as soon as it is answered,
-so a run stopped part way finishes where it stopped. Put the statement files you have in `imports/` first (make the
-folder) and `./ff init` sets up their accounts too.
+so a run stopped part way finishes where it stopped. `./ff init` makes `imports/`; put your statement files there
+before you answer its question about them, and it sets up their accounts too. `./ff up` then builds the dashboard's
+data about a minute after it starts.
 
 **Accounts with no file and no feed yet.** With neither statement files nor a bank feed, `./ff init` leaves
 `config/accounts.yaml` with no account, for you to declare them by hand. For a joint checking account and a credit
@@ -141,9 +144,12 @@ accounts:
     kind: credit-card
 ```
 
-Then `./ff validate` prints `config OK`, counting the two accounts. Once their statements arrive, give each account the
-format and file names that read them ([Statement files](#statement-files)), or connect the bank feed with
-`./ff init --force`.
+Then `./ff validate` prints `config OK`, counting the two accounts. `./ff up` works meanwhile: the dashboard says what
+is missing. Once their statements arrive, give each account the format and file names that read them (`parser:` and
+`glob:`, [Statement files](#statement-files)), then **Rebuild from files** on the Data page or `./ff refresh`; or
+connect the bank feed with
+`./ff init --feed`: it asks which of these accounts each feed account is, adds the rest as new accounts and leaves
+every other line as it is.
 
 **Without questions:** copy the example answers file
 [examples/answers.yaml](examples/answers.yaml) **outside** the install directory, make it yours alone, edit it, and
@@ -151,7 +157,7 @@ give it to `./ff init`:
 
 ```sh
 curl -fsSL -o ~/ff-answers.yaml \
-  https://raw.githubusercontent.com/Good-Work-Dojo/Family-Financials/v1.0.0/examples/answers.yaml
+  https://raw.githubusercontent.com/Good-Work-Dojo/Family-Financials/v1.0.1/examples/answers.yaml
 chmod 600 ~/ff-answers.yaml          # in a copy of the source: cp examples/answers.yaml ~/ff-answers.yaml instead
 # edit ~/ff-answers.yaml: your names, time zone and a passcode of your own
 ./ff init --answers ~/ff-answers.yaml
@@ -167,6 +173,10 @@ read or that sits inside the install (where a backup would carry it); delete it 
 settings, the config, the passcode, the feed's freshness, free space, the port) and says how to fix each problem.
 The config lives in `config/` as plain YAML: every key, its type and its default is in
 [docs/configuration.md](docs/configuration.md), and `./ff validate` checks it after every edit.
+
+**When a command stops on an unexpected error**, it prints one line naming `data/last-error.txt`, which holds the
+details; `FF_DEBUG=1 ./ff <command>` prints them instead. Read the file before you attach it to a bug report: it can
+name your files and accounts.
 
 The install directory holds everything, each folder readable by you alone:
 
@@ -211,8 +221,10 @@ To set it up:
 1. Create a SimpleFIN Bridge account, connect your banks there and create a **setup token** (a single-use code).
 2. Give the token to `./ff init`: it claims the connection once (storing the access in `secrets/feed/`, readable by
    you alone), fetches the last 90 days and asks which of your accounts each feed account is. In an install that is
-   already set up, `./ff init --force` asks again (and asks for `household.yaml` and `accounts.yaml` again too, so
-   answer as before).
+   already set up, `./ff init --feed` does this step alone: for each feed account `accounts.yaml` does not name, it
+   asks whether it is one of your accounts (which then gets the feed's id), a new one, or none, and keeps every other
+   line of `accounts.yaml` and all of `household.yaml` as they are (the file as it was stays as
+   `accounts.yaml.previous`).
 3. That is all: every refresh fetches, then rebuilds. An account that has statement files from before the feed gets
    a `simplefin_cutover` date (`./ff init` sets it): the files own the days before it, the feed the days from it.
 
@@ -220,10 +232,15 @@ To set it up:
 connection needs it (an alert, if you set alerts up, and a warning on the Data page), and that account's balance
 stops moving. Sign in to SimpleFIN Bridge and reconnect that bank there; the next refresh picks it up. If reconnecting
 means deleting the bank in SimpleFIN and adding it again, the feed gives the account a **new id**: the Data page then
-shows an "Unmapped bank account". Find the new id in the newest snapshot in `store/simplefin/` (each account's `id`
-beside its `name`), put it in the account's `simplefin_id` in `config/accounts.yaml`, move the old one to its
-`simplefin_id_history` list (so the snapshots under the old id keep feeding the history), run `./ff validate`, then
-**Refresh now**.
+shows an "Unmapped bank account". After that refresh, `./ff init --feed` offers each new id to the account whose old
+id the feed no longer lists, and moves the old id to its history when you pick it. By hand instead:
+`./ff simplefin list-accounts` lists the feed's accounts with their ids, each
+beside the account that maps it or marked unmapped: put the new id in the account's `simplefin_id` in
+`config/accounts.yaml`, move the old one to its `simplefin_id_history` list (so the snapshots under the old id keep
+feeding the history), run `./ff validate`, then **Refresh now**. Delete the bank's old connection in SimpleFIN
+before adding it again: while the feed lists both, `./ff init --feed` cannot tell the new id belongs to an existing
+account (answer it by hand rather than taking "a new account", which would count the account twice). The days both
+connections cover can show some transactions twice, because the bank gives them new ids (see the roadmap).
 
 Mapping options, credit limits, loans and brokerages are in [docs/configuration.md](docs/configuration.md)
 (`accounts.yaml`). Without a feed, everything works from statement files alone.
@@ -237,7 +254,17 @@ A value no bank reports (the home, a car, a private holding) is entered in Setti
 
 A refresh that fails, a bank connection that needs signing in again, and an AI key that stops working can send you a
 message through a Telegram bot or a webhook of your own: the credentials go in files in `secrets/alerts/`
-([docs/design/platform.md](docs/design/platform.md), "Alerts"). With none set up, nothing is sent.
+([docs/design/platform.md](docs/design/platform.md), "Alerts"), each readable by you alone (an alert is not sent
+through a file others may read). In the install directory, for a Telegram bot:
+
+```sh
+umask 077
+printf '%s' 'YOUR-BOT-TOKEN' > secrets/alerts/telegram_token
+printf '%s' 'YOUR-CHAT-ID' > secrets/alerts/telegram_chat_id
+docker compose exec refresher /opt/ff/deploy/refresh.sh test-alert   # sends a test message (the dashboard running)
+```
+
+With none set up, nothing is sent.
 
 ## How data flows, and what never leaves your machine
 
@@ -425,13 +452,24 @@ it too.
 ```
 
 `./ff restore` checks the whole archive before writing anything and refuses to overwrite a config that is there
-(`--force` replaces files of the same name). Without the secrets, connect the bank feed again with a new setup token
-(`./ff init --force`).
+(`--force` replaces files of the same name). An archive made with `--include-secrets` brings the bank feed's access
+back with it. Without the secrets, connect the bank feed again with a new setup token: `./ff init --feed` keeps the
+config the restore put back and adds only what is new. Not `./ff init --force`, which asks for the household again
+and replaces that config (keeping it only as `household.yaml.previous` and `accounts.yaml.previous`).
 
 **Upgrade, with the published images.** `./ff upgrade --to 1.1.0` (the new version, as the release notes name it)
 backs up first, keeps your settings as `.env.previous`, downloads the new images, checks your config with them,
-restarts, rebuilds the data and runs `./ff doctor`. If it stops before restarting, nothing changed. If it stops after,
-it says how to go back: `cp .env.previous .env`, then `./ff up`. Copy the new release's `ff` over your install's too.
+restarts, rebuilds the data and runs `./ff doctor`. It also brings `compose.yaml` to the new release's, keeping the
+old one as `compose.yaml.previous`; if you changed yours by hand, it is kept and the new release's is written beside
+it as `compose.yaml.new` for you to compare. If it stops before restarting, nothing changed. If it stops after, it
+says how to go back: `cp .env.previous .env` (and `cp compose.yaml.previous compose.yaml` when it replaced that), then
+`./ff up`, then `./ff refresh` to rebuild the data for the release before. Copy the new release's `ff` over your
+install's too.
+
+**Pinning the images by digest.** A tag can be moved; a digest cannot. To run exactly the images you checked, name
+each by its digest in `.env`, as `FF_IMAGE_ETL=ghcr.io/good-work-dojo/family-financials-etl:1.0.1@sha256:…` and the
+same for `FF_IMAGE_WEB` (`docker buildx imagetools inspect` on an image prints its digest); `./ff upgrade --to`
+replaces the pin with the new release's tag.
 
 **Upgrade, with images you built.** `./ff upgrade` downloads images, which a locally built install does not use.
 Instead, in the source, check out the new release and build it, then in the install point `.env` at the new images:
@@ -445,8 +483,9 @@ cp ~/Family-Financials/ff . && ./ff backup
 ./ff up && ./ff refresh && ./ff doctor
 ```
 
-To go back, set the two lines to the old version and `./ff up` again (after `./ff restore <the backup> --force` if
-the new release changed your config).
+`./ff up` with the new images brings `compose.yaml` to the new release's as `./ff upgrade` does. To go back, set the
+two lines to the old version (and `cp compose.yaml.previous compose.yaml` if it was replaced), `./ff up` again, then
+`./ff refresh` (after `./ff restore <the backup> --force` if the new release changed your config).
 
 ## Leaving
 

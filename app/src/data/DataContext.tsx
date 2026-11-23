@@ -2,21 +2,18 @@
 // Additional terms: see NOTICE
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Skeleton from "../components/Skeleton";
-import { defaultClass } from "../lib/accounts";
 import { dataThrough } from "../lib/agg";
 import { applyAnswers, renameAnswersDoc, type OverlayResult } from "../lib/answers";
-import { SHIPPED_RESERVED } from "../lib/categories";
 import { clock } from "../lib/clock";
 import { comparableSnapshots } from "../lib/comparableSnapshots";
 import { IS_DEMO } from "../lib/demo";
 import { resolveAssumptions } from "../lib/prefs";
 import { childrenByParent, overlayPurchases, partitionSplits } from "../lib/splits";
-import { SHIPPED_ASSET_CLASSES } from "../lib/tokens";
 import {
-  AI_STATUS_NONE, EXPECTED_SCHEMA_VERSION, EXPORT_FILES, type AccountMeta, type AppData, type AssetRow, type Assumptions,
-  type BalancesTimeseries, type CashflowMonth, type ExportFile, type Holding, type Household, type Manifest,
-  type ManualAsset, type MortgageBlock, type NetworthDaily, type OpenQuestion, type QualityReport, type RecurringItem,
-  type Snapshot, type Transaction, type VendorEntry, type AiStatus,
+  AI_STATUS_NONE, EXPECTED_SCHEMA_VERSION, EXPORT_FILES, MIN_SCHEMA_VERSION, type AccountMeta, type AppData,
+  type Assumptions, type BalancesTimeseries, type CashflowMonth, type ExportFile, type Holding, type Manifest,
+  type ManualAsset, type NetworthDaily, type OpenQuestion, type QualityReport, type RecurringItem, type Snapshot,
+  type Transaction, type VendorEntry, type AiStatus,
 } from "./types";
 import { isSignInAnswer, leave, LOGIN_PATH, useSignedOut } from "./session";
 import { useAnswersStore, type AnswersApi } from "./useAnswersStore";
@@ -83,170 +80,39 @@ const EMPTY_QUALITY: QualityReport = {
   files: [], checks: [], account_month_sums: {}, top_unmapped_vendors: [], cross_file_duplicate_uids: {},
 };
 
-// An export set from an OLDER schema can reach this bundle: during a deploy the old image's refresher (a
-// "Refresh now", a cron tick) may write exports between the deploy's own ingest and `up -d`. So every key
-// added at schema 4 or later is defaulted here, on load,
-// to what "not there" means - never read bare, where an `undefined.length` in a memo above every
-// SectionBoundary is a white screen. Schema 4: the recurring schedule keys (unpromoted: no schedule, no
-// expected dates) and accounts' ledger_drift (null: the check did not run); schema 5: assumptions'
-// category_renames ([]: nothing renamed); schema 6: transactions' parent_id / is_parent (null / false: an
-// ordinary row); schema 13: assumptions' reserved (the names the shipped taxonomy files rows under,
-// SHIPPED_RESERVED); schema 14: the cash-flow months' in_coverage (that month's full_coverage, so the floor the
-// dashboard derives is the first fully covered month); schema 15: assumptions' net_worth (cards not counted: no older
-// export counted them) and each snapshot's assets_total / liabilities_total (summed from its rows), coverage (1) and
-// missing ([]); schema 16: assumptions' mortgage block, an older one mapped onto its keys (withMortgageBlock); schema
-// 17: the projections' own figure for the home is gone, an older export's dropped unread (withoutHomeFigure); schema
-// 19: the manifest's setup (the accounts counted, a feed configured when the feed was ever fetched, no import file
-// counted, the newest snapshot's stated rows as the manual assets: withSetup), the household's name ("": none stated) and
-// zone (null), modules ({}: none stated),
-// projections_stated ([]: every projection read as a default), asset_classes (the dashboard's own list,
-// SHIPPED_ASSET_CLASSES) and each account's resolved class, in accounts.json and in balances_timeseries.json's accounts
-// map (a null one is its kind's default: withAccountKeys, withBalanceAccountKeys);
-// networth_daily's current_total is null with no snapshot (an older export's 0 there too: withCurrentTotal), and so is
-// its placeholder; schema 20: accounts.json's manual_assets ([]: none listed) and each snapshot row's manual_id (null:
-// no manual asset named) and carried_back (false: withRowKeys); schema 21: accounts.json's manual_overridden ([]: no
-// config entry hidden); schema 22: the quality report's files[].account (null: no account named, withFileAccounts);
-// schema 23: ai_status.json, a whole file, whose absence reads as AI_STATUS_NONE (no key, not switched on).
-// Older keys predate any image
-// that can still be running.
-// (vendors.json, schema 3, is a whole optional file: a 404 is already its placeholder.)
-// The other direction - a NEWER export under this (older, still open) bundle, which would read it the old
-// way - is caught in DataProvider: a persistent "the dashboard was updated - reload" banner (the same one a newer BUILD
-// raises, data/useBuildCheck.ts: most deploys change the app and bump no schema).
-type Older<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
-type ScheduleKeys = "schedule" | "expected_dates" | "grace_days" | "confidence" | "median_gap_days";
-const withScheduleKeys = (r: Older<RecurringItem, ScheduleKeys>): RecurringItem => ({
-  ...r, schedule: r.schedule ?? false, expected_dates: r.expected_dates ?? [], grace_days: r.grace_days ?? 0,
-  confidence: r.confidence ?? 0, median_gap_days: r.median_gap_days ?? 0,
-});
-/** accounts.json's rows as any schema writes them: before schema 19 an account that takes its kind's class says null */
-type AccountAsLoaded = Omit<Older<AccountMeta, "ledger_drift">, "asset_class"> & { asset_class: string | null };
-/** ledger_drift null when the export predates it; a null class read as the one the engine gives such an account (the
- *  `mortgage: true` loan is the assumptions' mortgage account) */
-const withAccountKeys = (a: AccountAsLoaded, mortgageId: string | null): AccountMeta => ({
-  ...a, ledger_drift: a.ledger_drift ?? null,
-  asset_class: a.asset_class ?? defaultClass(a.kind, a.id === mortgageId),
-});
-type BalanceAccount = BalancesTimeseries["accounts"][string];
-/** balances_timeseries.json as any schema writes it: before schema 19 its accounts map says null for an account that
- *  takes its kind's class */
-type BalancesAsLoaded = Omit<BalancesTimeseries, "accounts">
-  & { accounts: Record<string, Omit<BalanceAccount, "asset_class"> & { asset_class: string | null }> };
-/** a null class in the balances' accounts map read as accounts.json's is (withAccountKeys): the class the engine gives
- *  such an account, so isCashLike, which decides by class alone, keeps a checking account on its kind's class as cash */
-const withBalanceAccountKeys = (b: BalancesAsLoaded, mortgageId: string | null): BalancesTimeseries => ({
-  ...b,
-  accounts: Object.fromEntries(Object.entries(b.accounts).map(([id, a]): [string, BalanceAccount] => [id, {
-    ...a, asset_class: a.asset_class ?? defaultClass(a.kind as AccountMeta["kind"], id === mortgageId) }])),
-});
-type ManifestAsLoaded = Older<Manifest, "setup">;
-/** A manifest before schema 19 says nothing of what is configured: the accounts are the ones accounts.json lists, a
- *  feed counts as configured once it was fetched, no import file is counted, and the manual assets are the newest
- *  snapshot's hand-stated rows (none without a snapshot). */
-const withSetup = (m: ManifestAsLoaded, accounts: number, newest: Pick<Snapshot, "rows"> | undefined): Manifest => ({
-  ...m,
-  setup: m.setup ?? { accounts, feed: m.simplefin_fetched_at != null, import_files: 0,
-    manual_assets: newest?.rows.filter((r) => r.source === "stated").length ?? 0 },
-});
-/** With no snapshot no net worth is known: an export older than schema 19 summed no rows to 0 there, read as null */
-const withCurrentTotal = (n: NetworthDaily): NetworthDaily =>
-  ({ ...n, current_total: n.current_snapshot_date === null ? null : n.current_total });
-type HouseholdAsLoaded = Older<Household, "name" | "timezone">;
-const withHouseholdKeys = (h: HouseholdAsLoaded): Household =>
-  ({ ...h, name: h?.name ?? "", timezone: h?.timezone ?? null });
-type AssumptionKeys = "category_renames" | "reserved" | "net_worth" | "modules" | "projections_stated" | "asset_classes";
-/** assumptions.json `mortgage` as a schema-15 export wrote it: the balance under latest_balance*, the terms under the
- *  names assumptions.yaml gave them, and schedule rows that carry more than a date and a principal balance */
-interface MortgageV15 {
-  latest_balance: number | null;
-  latest_balance_as_of: string | null;
-  note_rate_pct?: number | null;
-  monthly_pi?: number | null;
-  monthly_escrow?: number | null;
-  escrow_balance?: number | null;
-  schedule: { date: string; principal_balance: number }[];
+/** An export set OLDER than this bundle reads (MIN_SCHEMA_VERSION): during a deploy the old image's refresher (a
+ *  "Refresh now", a cron tick) may write exports between the deploy's own ingest and `up -d`. Such a set is not read at
+ *  all, since a key it lacks read bare is an `undefined.length` in a memo above every SectionBoundary (a white screen):
+ *  DataProvider shows the reload notice instead, until the next refresh rewrites the exports. A key added after
+ *  MIN_SCHEMA_VERSION gets its default in loadAppData, on load, to what "not there" means. The other direction - a
+ *  NEWER export under this (older, still open) bundle, which would read it the old way - raises the same notice over
+ *  the working app (the one a newer BUILD raises, data/useBuildCheck.ts: most deploys change the app and bump no
+ *  schema). */
+export class OlderExportsError extends Error {
+  constructor(readonly version: unknown) {
+    super(`the exports were written at schema ${String(version)}; this dashboard reads schema ${MIN_SCHEMA_VERSION} and later`);
+    this.name = "OlderExportsError";
+  }
 }
-/** The projections as the dashboard reads them: a schema-16 export also carries its own figure for the home, dropped
- *  here unread, since the home's value is the snapshot's House-class rows (lib/lifeSummary homeValue). */
-const withoutHomeFigure = (p: Assumptions["projections"]): Assumptions["projections"] => {
-  if (p == null) return p;
-  const { home_value_estimate: _unread, ...rest } = p as Assumptions["projections"] & { home_value_estimate?: unknown };
-  return rest;
-};
-type AssumptionsAsLoaded = Omit<Older<Assumptions, AssumptionKeys>, "mortgage" | "household">
-  & { mortgage?: MortgageBlock | MortgageV15 | null; household: HouseholdAsLoaded };
-/** A schema-15 block on the schema-16 keys: its balance, rate (note_rate_pct), payment (monthly_pi) and escrow keys,
- *  and its schedule's dates and balances. It named no account, so the id is the current snapshot's Mortgage-class row's
- *  ("" when it has none), and it stated no origination or term (null). A block of the current shape passes through. */
-const withMortgageBlock = (m: MortgageBlock | MortgageV15 | null | undefined,
-                           current: Pick<Snapshot, "rows"> | undefined): MortgageBlock | null => {
-  if (m == null) return null;
-  if (!("latest_balance" in m)) return m;
-  return {
-    account_id: current?.rows.find((r) => r.asset_class === "Mortgage" && r.account_id !== null)?.account_id ?? "",
-    balance: m.latest_balance, balance_as_of: m.latest_balance_as_of,
-    rate_pct: m.note_rate_pct ?? null, monthly_payment: m.monthly_pi ?? null,
-    monthly_escrow: m.monthly_escrow ?? null, escrow_balance: m.escrow_balance ?? null,
-    origination: null, term_months: null,
-    schedule: m.schedule.map((r) => ({ date: r.date, principal_balance: r.principal_balance })),
-  };
-};
-const withAssumptionKeys = (a: AssumptionsAsLoaded, current: Pick<Snapshot, "rows"> | undefined): Assumptions => ({
-  ...a, category_renames: a.category_renames ?? [], reserved: a.reserved ?? SHIPPED_RESERVED,
-  net_worth: a.net_worth ?? { include_credit_cards: false },
-  mortgage: withMortgageBlock(a.mortgage, current),
-  projections: withoutHomeFigure(a.projections),
-  household: withHouseholdKeys(a.household),
-  modules: a.modules ?? {},
-  projections_stated: a.projections_stated ?? [],
-  asset_classes: a.asset_classes ?? SHIPPED_ASSET_CLASSES,
-});
-type SnapshotKeys = "assets_total" | "liabilities_total" | "coverage" | "missing";
-type RowKeys = "manual_id" | "carried_back";
-/** a snapshot as any schema writes it: before schema 20 its rows lack RowKeys */
-type SnapshotAsLoaded = Omit<Older<Snapshot, SnapshotKeys>, "rows"> & { rows: Older<AssetRow, RowKeys>[] };
-/** a row before schema 20 names no manual asset and is never carried back */
-const withRowKeys = (r: Older<AssetRow, RowKeys>): AssetRow =>
-  ({ ...r, manual_id: r.manual_id ?? null, carried_back: r.carried_back ?? false });
-/** the sum of the rows whose value has `sign`, added in whole cents so the total has no float residue */
-const sumRows = (rows: SnapshotAsLoaded["rows"], sign: 1 | -1): number =>
-  rows.reduce((cents, r) => cents + (Math.sign(r.value) === sign ? Math.round(r.value * 100) : 0), 0) / 100;
-const withSnapshotKeys = (s: SnapshotAsLoaded): Snapshot => ({
-  ...s,
-  assets_total: s.assets_total ?? sumRows(s.rows, 1),
-  liabilities_total: s.liabilities_total ?? sumRows(s.rows, -1),
-  coverage: s.coverage ?? 1,
-  missing: s.missing ?? [],
-  rows: s.rows.map(withRowKeys),
-});
-type SplitKeys = "parent_id" | "is_parent";
-const withSplitKeys = (t: Older<Transaction, SplitKeys>): Transaction =>
-  ({ ...t, parent_id: t.parent_id ?? null, is_parent: t.is_parent ?? false });
-const withCoverage = (m: Older<CashflowMonth, "in_coverage">): CashflowMonth =>
-  ({ ...m, in_coverage: m.in_coverage ?? m.full_coverage });
-/** cashflow_monthly.json as any schema writes it; the loader reads the floor from the months, never the file's key, and
- *  the cash-flow accounts with any transaction from the months' `accounts_covered`, never its account list */
-type CashflowAsLoaded = { months: Older<CashflowMonth, "in_coverage">[] };
-type FileStat = QualityReport["files"][number];
-/** quality_report.json as any schema writes it: before schema 22 a file names no account */
-type QualityAsLoaded = Omit<QualityReport, "files"> & { files: Older<FileStat, "account">[] };
-const withFileAccounts = (q: QualityAsLoaded): QualityReport =>
-  ({ ...q, files: q.files.map((f) => ({ ...f, account: f.account ?? null })) });
+
+/** an export's schema version, as its manifest states it: one older than MIN_SCHEMA_VERSION, or none at all, is not read */
+const readable = (version: unknown): boolean => typeof version === "number" && version >= MIN_SCHEMA_VERSION;
 
 export async function loadAppData(): Promise<LoadedAppData> {
   // same order as EXPORT_FILES — the index is how a rejection is mapped back to its file
   const results = await Promise.allSettled([
-    fetchJson<ManifestAsLoaded>("manifest.json"),
-    fetchJson<{ transactions: Older<Transaction, SplitKeys>[] }>("transactions.json"),
-    fetchJson<{ accounts: AccountAsLoaded[]; manual_assets?: ManualAsset[]; manual_overridden?: ManualAsset[] }>("accounts.json"),
-    fetchJson<{ snapshots: SnapshotAsLoaded[] }>("assets_timeseries.json"),
+    fetchJson<Manifest>("manifest.json"),
+    fetchJson<{ transactions: Transaction[] }>("transactions.json"),
+    fetchJson<{ accounts: AccountMeta[]; manual_assets: ManualAsset[]; manual_overridden: ManualAsset[] }>("accounts.json"),
+    fetchJson<{ snapshots: Snapshot[] }>("assets_timeseries.json"),
     fetchJson<{ holdings: Holding[] }>("holdings.json"),
-    fetchJson<CashflowAsLoaded>("cashflow_monthly.json"),
-    fetchJson<{ items: Older<RecurringItem, ScheduleKeys>[] }>("recurring.json"),
-    fetchJson<QualityAsLoaded>("quality_report.json"),
-    fetchJson<{ questions: OpenQuestion[]; data_gaps?: OpenQuestion[] }>("open_questions.json"),
-    fetchJson<AssumptionsAsLoaded>("assumptions.json"),
-    fetchJson<BalancesAsLoaded>("balances_timeseries.json"),
+    // the floor is read from the months' own flags (lib/agg.ts), never the file's key or its account list
+    fetchJson<{ months: CashflowMonth[] }>("cashflow_monthly.json"),
+    fetchJson<{ items: RecurringItem[] }>("recurring.json"),
+    fetchJson<QualityReport>("quality_report.json"),
+    fetchJson<{ questions: OpenQuestion[]; data_gaps: OpenQuestion[] }>("open_questions.json"),
+    fetchJson<Assumptions>("assumptions.json"),
+    fetchJson<BalancesTimeseries>("balances_timeseries.json"),
     fetchJson<NetworthDaily>("networth_daily.json"),
     fetchJson<{ count: number; vendors: VendorEntry[] }>("vendors.json"),
     fetchJson<AiStatus>("ai_status.json"),
@@ -273,37 +139,36 @@ export async function loadAppData(): Promise<LoadedAppData> {
     r.status === "fulfilled" ? r.value : placeholder;
   const [manifest, tx, accounts, assets, holdings, cashflow, recurring,
     quality, questions, assumptions, balances, networthDaily, vendors, aiStatus] = results;
+  // an export set older than this bundle reads is not read at all: the provider shows the reload notice
+  const version = must(manifest).schema_version;
+  if (!readable(version)) throw new OlderExportsError(version);
   const q = or(questions, { questions: [], data_gaps: [] });
-  const cf = or<CashflowAsLoaded>(cashflow, { months: [] });
-  const views = partitionSplits(must(tx).transactions.map(withSplitKeys));
+  const views = partitionSplits(must(tx).transactions);
   // every page compares snapshots with the newest, so a month end that lacks an account the newest has stays out of
   // them (it would show the day the account was added as a jump in net worth); the Data page counts those
-  const allSnapshots = must(assets).snapshots.map(withSnapshotKeys);
-  const snapshots = comparableSnapshots(allSnapshots);
-  const asm = withAssumptionKeys(must(assumptions), allSnapshots[allSnapshots.length - 1]);
-  const accountsFile = or(accounts, { accounts: [] });
-  const accountList = accountsFile.accounts.map((a) => withAccountKeys(a, asm.mortgage?.account_id ?? null));
+  const snapshots = comparableSnapshots(must(assets).snapshots);
+  const accountsFile = or(accounts, { accounts: [], manual_assets: [], manual_overridden: [] });
   return {
     data: {
-      manifest: withSetup(must(manifest), accountList.length, allSnapshots[allSnapshots.length - 1]),
+      manifest: must(manifest),
       transactions: views.transactions,
       purchases: views.purchases,
       splitParents: views.splitParents,
-      accounts: accountList,
-      manualAssets: accountsFile.manual_assets ?? [],
-      manualOverridden: accountsFile.manual_overridden ?? [],
+      accounts: accountsFile.accounts,
+      manualAssets: accountsFile.manual_assets,
+      manualOverridden: accountsFile.manual_overridden,
       assets: { snapshots: snapshots.comparable },
       partialSnapshots: snapshots.partial,
       holdings: or(holdings, { holdings: [] }).holdings,
-      cashflow: cf.months.map(withCoverage),
-      recurring: or(recurring, { items: [] }).items.map(withScheduleKeys),
-      quality: withFileAccounts(or<QualityAsLoaded>(quality, EMPTY_QUALITY)),
+      cashflow: or(cashflow, { months: [] }).months,
+      recurring: or(recurring, { items: [] }).items,
+      quality: or(quality, EMPTY_QUALITY),
       questions: q.questions,
-      dataGaps: q.data_gaps ?? [],
-      assumptions: asm,
-      balances: withBalanceAccountKeys(or(balances, { series: {}, accounts: {} }), asm.mortgage?.account_id ?? null),
+      dataGaps: q.data_gaps,
+      assumptions: must(assumptions),
+      balances: or(balances, { series: {}, accounts: {} }),
       // current_total is unread by the app; the daily line gates on `missing`. No file: no total known (null, never 0)
-      networthDaily: withCurrentTotal(or(networthDaily, { series: [], current_total: null, current_snapshot_date: null })),
+      networthDaily: or(networthDaily, { series: [], current_total: null, current_snapshot_date: null }),
       vendors: or(vendors, { count: 0, vendors: [] }).vendors,
       aiStatus: or(aiStatus, AI_STATUS_NONE),
     },
@@ -400,6 +265,18 @@ function DataNotice({ testId, children, actions }: { testId: string; children: R
 }
 const noticeBtn = "min-h-11 rounded-md border border-amber-700/60 px-2.5 text-amber-200 hover:bg-amber-900/40 md:min-h-0 md:py-1";
 
+/** "The dashboard was updated — reload": a newer build or export than this page, or (`older`) exports older than this
+ *  bundle reads, which the next refresh rewrites */
+function UpdatedNotice({ older = false }: { older?: boolean }) {
+  return (
+    <DataNotice testId="notice-updated"
+      actions={<button type="button" className={noticeBtn} onClick={() => location.reload()}>Reload</button>}>
+      {older ? "The dashboard was updated — its data is rebuilt at the next refresh; reload this page then."
+        : "The dashboard was updated — reload this page to switch to the new version."}
+    </DataNotice>
+  );
+}
+
 /** how often the page shown while nothing is built looks for the exports again */
 export const NOTHING_BUILT_RECHECK_MS = 30_000;
 
@@ -425,6 +302,9 @@ export function DataProvider({ children, nothingBuilt }: {
   const [unbuilt, setUnbuilt] = useState(false);
   /** a later reload failed: the last good data stays on screen under a retry banner */
   const [reloadError, setReloadError] = useState<string | null>(null);
+  /** the last load met an export set older than this bundle reads (OlderExportsError): the reload notice, over the last
+   *  good data when there is some, else alone */
+  const [older, setOlder] = useState(false);
   const hasData = useRef(false);
   /** the last first-load outcome was nothing built: a later look that fails for another reason leaves it standing */
   const wasUnbuilt = useRef(false);
@@ -441,12 +321,18 @@ export function DataProvider({ children, nothingBuilt }: {
         // the demo's clock stands at the moment its exports were built, before anything reads it
         if (IS_DEMO) clock.freeze(next.data.manifest.generated_at);
         hasData.current = true; wasUnbuilt.current = false;
-        setLoaded(next); setReloadError(null); setError(null); setUnbuilt(false);
+        setLoaded(next); setReloadError(null); setError(null); setUnbuilt(false); setOlder(false);
         setLoads((n) => n + 1);
         return "loaded";
       },
       (e): LookOutcome => {
+        if (e instanceof OlderExportsError) {
+          setOlder(true);
+          if (!hasData.current) { wasUnbuilt.current = false; setUnbuilt(false); setError(String(e)); }
+          return "failed";
+        }
         if (hasData.current) { setReloadError(String(e)); return "failed"; }
+        setOlder(false);
         const nothing = e instanceof NothingBuiltError;
         if (wasUnbuilt.current && !nothing) return "failed";
         wasUnbuilt.current = nothing;
@@ -526,6 +412,8 @@ export function DataProvider({ children, nothingBuilt }: {
     [merged, indexes, overlaid, loaded, answers, prefs, reload]);
 
   if (showUnbuilt && nothingBuilt) return <>{nothingBuilt(load, quietLooks)}</>;
+  // exports older than this bundle reads, and nothing loaded before them: the reload notice alone, not the error screen
+  if (error && older) return <UpdatedNotice older />;
   if (error)
     return (
       <div role="alert" className="m-4 max-w-xl rounded-lg border border-red-700 bg-red-950/40 p-6 text-red-200 sm:m-10">
@@ -549,16 +437,11 @@ export function DataProvider({ children, nothingBuilt }: {
     return <div className="m-10"><Skeleton variant="page" /></div>;
   return (
     <DataCtx.Provider value={value}>
-      {/* ONE banner, two triggers: a newer export under this older bundle (read the old way until the page reloads; an older
-          one is defaulted in loadAppData), or a newer BUILD (a deploy while this tab stayed open - most deploys bump no
-          schema, so the old bundle would otherwise run on, bugs and all). Persistent, and never an auto-reload: an edit
-          may be in flight. */}
-      {(merged.manifest.schema_version > EXPECTED_SCHEMA_VERSION || newerBuild) && (
-        <DataNotice testId="notice-updated"
-          actions={<button type="button" className={noticeBtn} onClick={() => location.reload()}>Reload</button>}>
-          The dashboard was updated — reload this page to switch to the new version.
-        </DataNotice>
-      )}
+      {/* ONE banner, three triggers: a newer export under this older bundle (read the old way until the page reloads), a
+          newer BUILD (a deploy while this tab stayed open - most deploys bump no schema, so the old bundle would otherwise
+          run on, bugs and all), or a reload that met an export set older than this bundle reads (the last good data stays
+          on screen). Persistent, and never an auto-reload: an edit may be in flight. */}
+      {(older || merged.manifest.schema_version > EXPECTED_SCHEMA_VERSION || newerBuild) && <UpdatedNotice older={older} />}
       {/* ONE banner for the whole page, whichever store call found the sign-in ended; the link is a plain one, so following
           it leaves the page (the sign-in page loads no bundle), and nothing leaves by itself: the unsent edits stay here
           and in this browser's copy until then */}

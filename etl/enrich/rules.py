@@ -345,17 +345,22 @@ def _raise_or_collect(found: list[str], problems: list[str] | None) -> None:
 
 def validate_taxonomy(rules: list[Rule], taxonomy: dict[str, list[str]], problems: list[str] | None = None) -> None:
     """Every rule that sets a category must name a taxonomy category, and its subcategory
-    must be seeded there (the internal category's subcategories are dynamic: txn types / family-fact
-    labels), so the loader refuses a typo instead of minting a new bucket. The first problem raises
-    ValueError, or every one is appended to `problems` when it is given."""
+    must be seeded there, so the loader refuses a typo instead of minting a new bucket. No rule may
+    name the internal category: a rule sets no type, and the type alone takes a row out of spending
+    and income, so a row filed Internal by a rule would still count (a transfer rule or an override
+    sets the type). The first problem raises ValueError, or every one is appended to `problems` when
+    it is given."""
     found = []
     for r in rules:
         cat, sub = r.set.get("category"), r.set.get("subcategory")
         if cat is None:
             continue
-        if cat not in taxonomy:
+        if cat == INTERNAL_CATEGORY:
+            found.append(f"{_where(r)}: category {cat!r} does not make a row internal, so it would still count in "
+                         "spending or income — set type: transfer (transfer_rules.yaml or an override) instead")
+        elif cat not in taxonomy:
             found.append(f"{_where(r)}: category {cat!r} not in taxonomy")
-        elif sub is not None and cat != INTERNAL_CATEGORY and sub not in (taxonomy.get(cat) or []):
+        elif sub is not None and sub not in (taxonomy.get(cat) or []):
             found.append(f"{_where(r)}: subcategory {sub!r} not seeded under {cat!r}")
     _raise_or_collect(found, problems)
 

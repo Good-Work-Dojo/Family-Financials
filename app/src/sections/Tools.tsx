@@ -592,7 +592,7 @@ export function RetirementCard({ hh, year, retirementBy, reported, reportedAccou
     <Card testId="card-retirement"
       title={`Retirement projection — ${solo !== null ? `${solo}'s retirement accounts`
         : who === "Combined" ? "combined retirement accounts" : `${who}'s retirement accounts`}`}
-      right={owners.length > 1 ? <SegmentToggle value={who}
+      right={owners.length > 1 ? <SegmentToggle label="Whose accounts" value={who}
         options={[{ value: "Combined", label: "Combined" },
           ...owners.map((o) => ({ value: o.name, label: o.name }))]}
         onChange={setWho} /> : undefined}>

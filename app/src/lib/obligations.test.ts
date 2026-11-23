@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Additional terms: see NOTICE
+import dayjs from "dayjs";
 import { describe, expect, it } from "vitest";
+import { HAVE_EXPORTS, readExport, requireExports } from "../test/exports";
+import type { RecurringItem } from "../data/types";
 import { recFactory } from "./__fixtures__";
 import {
   expectedCharges, groupObligations, isLumpy, LUMPY_MIN, obligationMonths, obligationsByMonth, obligationsFrom,
@@ -48,6 +51,16 @@ describe("the next-12-months chart's bars", () => {
     // a first-business-day bill's dates (2 Nov, 1 Dec, 1 Jan): the months after them, once each
     expect(expectedCharges(rec({ expected_dates: ["2026-11-02", "2026-12-01", "2027-01-01"] }), "2027-03-31")
       .map((d) => d.slice(0, 7))).toEqual(["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04"]);
+  });
+  // the ETL exports a monthly item's next thirteen dates (etl/enrich/recurring.py MONTHLY_EXPECTED_DATES), each on its
+  // own rule: the twelve months after the month in progress read them as they are, never a stepped one
+  it("a monthly item's exported year of dates is read as it is: a last-business-day bill never lands on a weekend", () => {
+    const lbd = ["2026-11-30", "2026-12-31", "2027-01-29", "2027-02-26", "2027-03-31", "2027-04-30", "2027-05-31",
+      "2027-06-30", "2027-07-30", "2027-08-31", "2027-09-30", "2027-10-29", "2027-11-30"];
+    const months = obligationMonths("2026-11");
+    const dates = obligationsInMonths([rec({ expected_dates: lbd })], months).map((o) => o.date);
+    expect(dates).toEqual(lbd.slice(1));
+    for (const d of dates) expect([0, 6], d).not.toContain(dayjs(d).day());
   });
   it("a weekly or biweekly item continues by its median gap, as the ETL steps it; with none stated, by 7 or 14 days", () => {
     expect(expectedCharges(rec({ cadence: "biweekly", expected_dates: ["2026-07-03", "2026-07-17", "2026-07-31"],
@@ -143,5 +156,25 @@ describe("groupObligations - one entry per vendor and amount", () => {
     const o = (amount: number, date: string) => ({ vendor: "V", category: null, date, amount, cadence: "annual" as const, lumpy: true });
     expect(groupObligations([o(100, "2026-07-01"), o(120, "2026-08-01"), o(100, "2026-09-01")])
       .map((g) => [g.amount, g.count])).toEqual([[100, 2], [120, 1]]);
+  });
+});
+
+// On a household's own exports: every active monthly item carries a year of dates, and the next-12-months window after
+// the ingest month holds exactly the exported dates that fall in it (none stepped by the dashboard)
+describe("the exported expected dates reach the next-12-months window", () => {
+  requireExports();
+  it.skipIf(!HAVE_EXPORTS)("each active monthly item's charges in the window are its exported dates there", () => {
+    const items: RecurringItem[] = readExport("recurring.json").items;
+    const months = obligationMonths(readExport("manifest.json").generated_at.slice(0, 7));
+    const [from, to] = [`${months[0]}-01`, dayjs(`${months[11]}-01`).endOf("month").format("YYYY-MM-DD")];
+    // a household with no monthly bill (the demo's tiny one) has nothing to check here
+    const monthly = items.filter((r) => r.active && r.cadence === "monthly");
+    expect(monthly.every((r) => r.expected_dates.length === 13), "a year of dates each").toBe(true);
+    // a bill already late (its next date before the month in progress) runs past its exported dates in the last month
+    for (const r of monthly.filter((m) => m.expected_dates[12].slice(0, 7) >= months[11])) {
+      const charges = obligationsInMonths([r], months).map((o) => o.date);
+      expect(charges.join() === r.expected_dates.filter((d) => d >= from && d <= to).join(), "the exported dates")
+        .toBe(true);
+    }
   });
 });

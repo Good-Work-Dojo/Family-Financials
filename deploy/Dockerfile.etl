@@ -112,7 +112,7 @@ WORKDIR /opt/ff
 # what the image is, for a registry and for `docker image inspect`: its name, where its source and documents live, its
 # licence, its release (.github/workflows/release.yml sets the same through the registry's metadata)
 ARG FF_SOURCE=https://github.com/Good-Work-Dojo/Family-Financials
-ARG FF_VERSION=1.0.0
+ARG FF_VERSION=1.0.1
 LABEL org.opencontainers.image.title="Family Financials ETL" \
       org.opencontainers.image.vendor="Family Financials" \
       org.opencontainers.image.source="${FF_SOURCE}" \

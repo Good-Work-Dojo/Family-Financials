@@ -16,8 +16,7 @@ export type FirstRunPage = FirstRunState | "nothing-built";
  *  hold a transaction, a net-worth snapshot or a point of an account's balance series (a household with transactions
  *  and no snapshot, or with card balances left out of net worth, gets the pages, each of which says what it lacks);
  *  otherwise "setup" when `manifest.setup` counts no account and no hand-stated asset, and "waiting" when it counts
- *  either. An export older than `setup` is read with the one the loader derives for it (data/DataContext.tsx
- *  `withSetup`). */
+ *  either. */
 export function firstRunState(manifest: Pick<Manifest, "setup">,
   data: Pick<AppData, "transactions" | "assets" | "balances">): FirstRunState | null {
   if (data.transactions.length > 0 || data.assets.snapshots.length > 0) return null;

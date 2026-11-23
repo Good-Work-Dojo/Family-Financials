@@ -462,6 +462,75 @@ def test_one_stall_costs_one_retry(bridge, home, capsys, monkeypatch):
     assert len(bridge.gets()) == 2 and out.read_bytes() == bridge.sent[-1]
 
 
+def test_a_rate_limit_answer_costs_one_request_and_is_not_retried(bridge, home, capsys, monkeypatch):
+    """The bridge's request budget is the scarce thing: a 429 is not asked again within seconds; the next scheduled
+    refresh asks."""
+    cfg, _, _ = _claimed(bridge)
+    monkeypatch.setattr(sf.time, "sleep", lambda seconds: pytest.fail("a rate-limited request was retried"))
+    bridge.answer(429, b"Too many requests", requests=3)
+    with pytest.raises(SystemExit) as caught:
+        sf.fetch(cfg)
+    assert str(caught.value) == "SimpleFIN HTTP 429 for GET /simplefin/accounts: Too many requests"
+    assert len(bridge.gets()) == 1 and cfg.find_simplefin_snapshots() == []
+
+
+def test_an_answer_with_no_account_is_not_stored_and_the_next_fetch_still_asks_for_90_days(bridge, home, capsys):
+    """A day-one re-authentication answers its errors and no account: the errors are printed, nothing is stored, and
+    the next fetch, which has still no answer holding an account, asks for the whole 90 days."""
+    cfg, _, _ = _claimed(bridge)
+    capsys.readouterr()
+    empty = {"errlist": [{"code": "con.auth", "msg": "Sign in again", "conn_id": "CON-fake-0001"}], "accounts": []}
+    bridge.answer(200, json.dumps(empty).encode())
+    assert sf.fetch(cfg) is None
+    printed = capsys.readouterr()
+    assert printed.err.splitlines() == [
+        "  WARN simplefin: Connection to CON-fake-0001 may need attention. [con.auth] Sign in again CON-fake-0001"]
+    assert printed.out == "Fetched 0 accounts (90d window): nothing stored\n"
+    assert cfg.find_simplefin_snapshots() == []
+    out = sf.fetch(cfg)
+    assert out.read_bytes() == bridge.sent[-1]
+    assert [int(r.query["end-date"][0]) - int(r.query["start-date"][0]) for r in bridge.gets()] == [90 * DAY, 90 * DAY]
+
+
+@pytest.mark.parametrize("stored", ['{"errlist": [], "accounts": []}', '{"accounts": ['],
+                         ids=["no-account", "damaged"])
+def test_a_stored_answer_holding_no_account_does_not_shorten_the_window(bridge, home, stored):
+    """The 90-or-35-day choice looks for a stored answer that holds an account: one stored with none (by an earlier
+    release) or a damaged one leaves the next fetch at 90 days; once an answer with an account is stored, 35."""
+    cfg, _, _ = _claimed(bridge)
+    cfg.simplefin_snapshots_dir.mkdir(parents=True, exist_ok=True)
+    (cfg.simplefin_snapshots_dir / "accounts-20300101T000000Z.json").write_text(stored)
+    sf.fetch(cfg)
+    sf.fetch(cfg)
+    assert [int(r.query["end-date"][0]) - int(r.query["start-date"][0]) for r in bridge.gets()] == [90 * DAY, 35 * DAY]
+
+
+@pytest.mark.parametrize("body", [b'{"accounts": null}', b'{"accounts": "x"}', b'{"accounts": ["x"]}', b"[]",
+                                  b'{"errlist": []}'],
+                         ids=["null", "text", "list-of-text", "a-list", "no-accounts-key"])
+def test_an_answer_not_laid_out_as_the_protocols_is_refused_in_one_line_and_not_stored(bridge, home, body):
+    cfg, _, _ = _claimed(bridge)
+    bridge.answer(200, body)
+    with pytest.raises(SystemExit) as caught:
+        sf.fetch(cfg)
+    assert str(caught.value) == "SimpleFIN answered without a list of accounts; not storing."
+    assert cfg.find_simplefin_snapshots() == []
+
+
+def test_a_write_that_fails_part_way_leaves_no_snapshot_and_no_stray_file(bridge, home, monkeypatch):
+    """The answer is written to a hidden file and linked under its name only once it is whole: a full disk or a kill
+    mid-write never leaves a half-written answer for every later ingest to stumble on."""
+    cfg, _, _ = _claimed(bridge)
+
+    def full_disk(fd):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(sf.os, "fsync", full_disk)
+    with pytest.raises(SystemExit) as caught:
+        sf.fetch(cfg)
+    assert str(caught.value) == "SimpleFIN answer could not be stored (No space left on device); nothing was stored."
+    assert list(cfg.simplefin_snapshots_dir.iterdir()) == []
+
+
 # ------------------------------------------------------------------ the protocol as the fake answers it
 
 def _raw(cfg: FeedConfig, **query: str) -> dict:
@@ -502,6 +571,20 @@ def test_list_accounts_names_the_connection_of_a_version_2_snapshot(bridge, home
     [row] = [line for line in capsys.readouterr().out.splitlines() if line.startswith(FEED_ID)]
     assert row.split() == [FEED_ID, "Sample", "Bank", "Sample", "Feed", "Checking", "0000", "1234.56", FEED,
                            "(mapped)"]
+
+
+def test_list_accounts_says_what_to_run_in_an_install_and_reads_the_newest_snapshot_it_can(bridge, home, capsys):
+    cfg, _, _ = _claimed(bridge)
+    with pytest.raises(SystemExit) as stop:
+        sf.list_accounts(cfg)
+    assert "./ff refresh" in str(stop.value) and "python -m etl" not in str(stop.value)
+    good = sf.fetch(cfg)
+    (good.parent / "accounts-29990101T000000Z.json").write_text("{not json", "utf-8")
+    capsys.readouterr()
+    sf.list_accounts(cfg)
+    out = capsys.readouterr().out
+    assert good.name in out and [line for line in out.splitlines() if line.startswith(FEED_ID)]
+    assert "./ff init --feed" in out and "make ingest" not in out
 
 
 def test_the_stored_snapshot_is_read_by_the_feeds_reader_and_an_offline_ingest_opens_no_socket(bridge, home,

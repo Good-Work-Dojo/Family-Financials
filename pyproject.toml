@@ -1,6 +1,6 @@
 [project]
 name = "finance-etl"
-version = "1.0.0"
+version = "1.0.1"
 description = "Family Financials ETL: read-only source files -> SQLite + JSON exports"
 authors = [{ name = "Family Financials contributors" }]
 license = "AGPL-3.0-only"

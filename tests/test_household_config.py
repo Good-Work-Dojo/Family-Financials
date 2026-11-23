@@ -40,6 +40,16 @@ def test_own_name_zelle_rows_are_candidates_only_with_household():
     assert not _engine(None)._is_venmoish(ours)        # no household -> nobody is "us"
 
 
+def test_an_own_name_token_matches_a_whole_word_of_the_party_only():
+    """An adult named Ed is not every party whose name holds those letters: FRED SMITH and TEDDY are third parties,
+    whose Zelle rows are real spending; ED SMITH and SMITH ED are the household's own."""
+    eng = _engine({"own_name_tokens": ["ED"]})
+    for party, ours in (("FRED SMITH", False), ("TEDDY ROE", False), ("EDNA ROE", False), ("ED SMITH", True),
+                        ("SMITH ED", True)):
+        row = make_txn(desc=f"ZELLE PAYMENT TO {party} 123", cents=-5000, account="chk")
+        assert eng._is_venmoish(row) is ours, party
+
+
 def test_counter_groups_come_from_the_rule_file_and_skip_own_account():
     groups = {"demo_pair": {"accounts": ["a_chk", "a_sav"], "expect_counterpart": True}}
     eng = TransferEngine([], {"groups": groups}, {}, {}, set())

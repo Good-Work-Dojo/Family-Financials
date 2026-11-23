@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Additional terms: see NOTICE
+import random
+import time
+from datetime import date, timedelta
+
 import pytest
 
 from etl.dates import (
@@ -41,6 +45,51 @@ def test_parse_cents_numeric_passthrough():
 
 def test_parse_cents_of_a_missing_cell_is_none():
     assert parse_cents(None) is None
+
+
+@pytest.mark.parametrize("raw", [float("inf"), float("-inf"), float("nan"), 1e16, -1e16, 10**16, "99999999999999999999.00",
+                                 "-1000000000000000.01", True, [1], {"amount": 1}])
+def test_an_amount_no_ledger_can_hold_is_refused_as_unreadable(raw):
+    """Beyond 10^17 cents (a quadrillion dollars, the bound OFX keeps too) no amount is real and SQLite cannot store
+    it; a non-finite float, a truth value or a container is no amount either: each is a ValueError, which every
+    caller turns into one unreadable row."""
+    with pytest.raises(ValueError):
+        parse_cents(raw)
+
+
+def test_the_largest_amount_a_ledger_holds_is_read():
+    assert parse_cents("1000000000000000.00") == 10**17
+    assert parse_cents(-10**15) == -10**17
+
+
+def _business_days_by_walking(a: str, b: str) -> int:
+    """The count stepped one day at a time: every weekday after the earlier date up to and including the later"""
+    d1, d2 = sorted((date.fromisoformat(a), date.fromisoformat(b)))
+    return sum((d1 + timedelta(days=i)).weekday() < 5 for i in range(1, (d2 - d1).days + 1))
+
+
+def test_business_days_between_agrees_with_walking_the_days():
+    """Weekends on either end, year ends, 29 February and long spans; both orders"""
+    named = [("2030-01-04", "2030-01-07"), ("2030-01-05", "2030-01-06"), ("2030-01-06", "2030-01-12"),
+             ("2029-12-27", "2030-01-03"), ("2028-02-28", "2028-03-01"), ("2028-02-29", "2032-02-29"),
+             ("2030-03-09", "2030-03-09"), ("2025-12-31", "2031-01-01")]
+    rng = random.Random(20301231)
+    start = date(2024, 1, 1)
+    pairs = named + [((start + timedelta(days=rng.randrange(3000))).isoformat(),
+                      (start + timedelta(days=rng.randrange(3000))).isoformat()) for _ in range(3000)]
+    pairs += [((start + timedelta(days=d)).isoformat(), (start + timedelta(days=d + k)).isoformat())
+              for d in range(14) for k in range(15)]
+    for a, b in pairs:
+        expected = _business_days_by_walking(a, b)
+        assert business_days_between(a, b) == business_days_between(b, a) == expected, (a, b)
+
+
+def test_business_days_between_costs_the_same_whatever_the_span():
+    """The generic transfer matcher asks this for every open pair across a household's whole history"""
+    started = time.perf_counter()
+    for _ in range(20_000):
+        business_days_between("2025-01-01", "2030-12-31")
+    assert time.perf_counter() - started < 1.0
 
 
 def test_fmt():

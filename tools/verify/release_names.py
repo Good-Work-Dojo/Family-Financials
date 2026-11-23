@@ -31,6 +31,10 @@ release's notes from CHANGELOG.md, each image's labels and annotations, and the 
   digest METADATA
       prints the pushed image's digest from a `docker buildx build --metadata-file` file (`containerimage.digest`,
       `sha256:` and 64 hex).
+  check-version INSTALL_PY TAG
+      prints nothing when TAG releases the version etl/install.py (INSTALL_PY) states as VERSION: v1.2.3 and
+      v1.2.3-rc.1 both release 1.2.3. A tag of another version would label images whose ff and compose.yaml still
+      name the tree's.
 
 TAG is `v<major>.<minor>.<patch>` with an optional pre-release part (`-rc.1`); REPOSITORY is `owner/name`. Anything
 else, a CHANGELOG with no such section or an empty one, or a metadata file with no digest, prints what is wrong and
@@ -127,6 +131,29 @@ def notes(changelog: str, tag: str) -> str:
     return text + "\n"
 
 
+_VERSION_LINE = re.compile(r'^VERSION = "([^"]+)"', re.M)
+
+
+def tree_version(install_py: str) -> str:
+    """the release's version as etl/install.py states it (`VERSION = "1.2.3"`)"""
+    m = _VERSION_LINE.search(install_py)
+    if not m:
+        raise ValueError("etl/install.py states no VERSION")
+    return m.group(1)
+
+
+def check_version(tag: str, tree: str) -> None:
+    """refuse a tag whose version is not the tree's: a full release's must equal it, a candidate's version without its
+    pre-release part (the tree holds the version it leads to, since uv normalises a pre-release version)"""
+    m = _TAG.fullmatch(tag)
+    if not m:
+        raise ValueError(f"the tag '{tag}' is not of the form v1.2.3 or v1.2.3-rc.1")
+    base = f"{m.group('major')}.{m.group('minor')}.{m.group('patch')}"
+    if base != tree:
+        raise ValueError(f"the tag {tag} releases {base}, but the tree is at {tree} (VERSION in etl/install.py): bump "
+                         "the version everywhere the consistency test pins it, merge, then tag that commit")
+
+
 def labels(image: str, source: str, version: str, revision: str, created: str) -> dict[str, str]:
     """the image's OCI keys and values: the project's title, description, vendor and licence, the repository's address
     as its source, url and documentation, the release's version, and the tag's commit and its commit time"""
@@ -194,11 +221,15 @@ def main(argv: list[str] | None = None) -> int:
         if len(args) == 2 and args[0] == "digest":
             print(digest(Path(args[1]).read_text("utf-8")))
             return 0
+        if len(args) == 3 and args[0] == "check-version":
+            check_version(args[2], tree_version(Path(args[1]).read_text("utf-8")))
+            return 0
     except (ValueError, OSError) as e:
         print(f"release: {e}", file=sys.stderr)
         return 2
     print("usage: release_names.py names REPOSITORY TAG [--prerelease] [--highest-full TAG] | notes CHANGELOG TAG"
-          " | highest | labels IMAGE SOURCE VERSION REVISION CREATED | digest METADATA", file=sys.stderr)
+          " | highest | labels IMAGE SOURCE VERSION REVISION CREATED | digest METADATA | check-version INSTALL_PY TAG",
+          file=sys.stderr)
     return 2
 
 

@@ -3141,6 +3141,27 @@ describe.skipIf(!HAVE_DATA)("every route renders against the household's data", 
     expect(drawerOpen(), "the next Escape closes the drawer").toBe(false);
   }, ROUTE_TIMEOUT);
 
+  // At phone width the closed drawer is inert (off the canvas is not closed for a keyboard or a screen reader); the menu
+  // button says it is expanded while the drawer is open, the open drawer takes focus, and Escape gives focus back
+  it("the phone's nav drawer: inert while closed, focus in while open, back on the menu button once closed", async () => {
+    media.phone = true;
+    try {
+      await mount("#/");
+      await settled("/");
+      const aside = document.querySelector("aside")!;
+      const button = screen.getByRole("button", { name: "Open menu" });
+      expect(aside.hasAttribute("inert") && button.getAttribute("aria-expanded") === "false", "closed: inert").toBe(true);
+      button.focus();
+      fireEvent.click(button);
+      expect(!aside.hasAttribute("inert") && button.getAttribute("aria-expanded") === "true", "open: not inert").toBe(true);
+      expect(aside.contains(document.activeElement), "focus moved into the drawer").toBe(true);
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(aside.hasAttribute("inert") && document.activeElement === button, "closed again, focus on the menu button").toBe(true);
+    } finally {
+      media.phone = false;
+    }
+  }, ROUTE_TIMEOUT);
+
   // /accounts/:id for an id nobody owns: the page says so and offers the way back
   it("a deep link to an unknown account renders the unknown-account card", async () => {
     await mount("#/accounts/not-a-real-id");
@@ -3629,10 +3650,10 @@ describe.skipIf(!HAVE_DATA)("every route renders against the household's data", 
         "the long name in full, cut by an ellipsis, its full text in title").toBe(true);
       cleanup();
       vi.stubGlobal("fetch", first);
-      // an export older than the key carries no name: the loader reads it as none stated
+      // an empty name is none stated
       stubServe("assumptions.json", () => {
         const doc = json("assumptions.json");
-        delete doc.household.name;
+        doc.household.name = "";
         return doc;
       });
       await mount("#/");
@@ -3785,7 +3806,7 @@ describe.skipIf(!HAVE_DATA)("every route renders against the household's data", 
     it("sees money when privacy mode is off (a net that cannot see amounts would pass everything): text, attributes and chart formatters", async () => {
       // the data-gap list holds the unmatched internal leg of truth's account, its context an unprefixed amount
       const gaps = some(json("open_questions.json").data_gaps, "data gaps");
-      expect(gaps.some((g: { question: string; context: string }) => g.question.includes(plantedAccount("data_gap.account").id)
+      expect(gaps.some((g: { question: string; context: string }) => g.question.includes(plantedAccount("data_gap.account").name)
         && /\d\.\d\d\b/.test(g.context)), "a data gap names truth's account and states an amount").toBe(true);
       const stats = { formatters: 0, chars: 0 };
       const home = await scanRoute("/", stats);

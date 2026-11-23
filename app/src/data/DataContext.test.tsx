@@ -9,7 +9,7 @@ import { isAutoWindow, rollingPreset, savedFilterQuery } from "../filters/useSpe
 import { appDataFactory, snapFactory, txFactory } from "../lib/__fixtures__";
 import { buildIndexes, DataProvider, type LookOutcome, NOTHING_BUILT_RECHECK_MS, useData } from "./DataContext";
 import { leave, noteStoreStatus, resetSession } from "./session";
-import { type AppData, type CategoryRename, EXPECTED_SCHEMA_VERSION, type Transaction } from "./types";
+import { type AppData, type CategoryRename, EXPECTED_SCHEMA_VERSION, MIN_SCHEMA_VERSION, type Transaction } from "./types";
 import type { AnswersApi } from "./useAnswersStore";
 
 /** The wiring behind category renames: DataProvider sees the stored answers and the
@@ -28,12 +28,11 @@ const ANSWERS = { version: 1, updated_at: "2026-06-09T12:00:00Z", answers: [{
   answered_at: ANSWERED_BEFORE_INGEST }] };
 
 function serve(opts: { yamlBudgets?: Record<string, number>; prefsBudgets?: Record<string, number>;
-                       renames?: CategoryRename[]; schema4?: boolean; rows?: Transaction[]; answers?: unknown;
+                       renames?: CategoryRename[]; rows?: Transaction[]; answers?: unknown;
                        /** the answers GET waits for this */
                        holdAnswers?: Promise<void>; schemaVersion?: number }) {
   const assumptions: Record<string, unknown> = { ...base.assumptions, category_renames: opts.renames ?? RENAMES,
                                                  budgets: opts.yamlBudgets ?? {} };
-  if (opts.schema4) delete assumptions.category_renames;      // what an old image's ingest writes
   const bodies: Record<string, unknown> = {
     "manifest.json": { ...base.manifest, schema_version: opts.schemaVersion ?? base.manifest.schema_version },
     "transactions.json": { count: 1, transactions: opts.rows ?? [ROW] },
@@ -95,13 +94,6 @@ describe("DataProvider and category renames", () => {
   it("renames the family's in-app budgets, which replace the YAML ones as before", async () => {
     serve({ yamlBudgets: { "Eating Out": 700, Utilities: 300 }, prefsBudgets: { "Eating Out": 900, Groceries: 1200 } });
     expect((await probed()).budgets).toEqual({ Dining: 900, Groceries: 1200 });
-  });
-
-  // an old image's refresher can write a schema-4 assumptions.json during a deploy (no category_renames):
-  // the provider's memos read the map, and a TypeError there sits above every SectionBoundary - a white screen
-  it("renders over a schema-4 assumptions.json (no category_renames) as if nothing were renamed", async () => {
-    serve({ schema4: true, yamlBudgets: { "Eating Out": 800 } });
-    expect(await probed()).toMatchObject({ answers: 1, conflicted: 1, budgets: { "Eating Out": 800 } });
   });
 });
 
@@ -194,10 +186,39 @@ describe("DataProvider and an export set from a NEWER schema (the dashboard was 
     expect(screen.getByRole("button", { name: "Reload" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Dismiss" }), "persistent: no dismiss").toBeNull();
   });
-  it("the version this bundle expects shows nothing, and neither does an older one (loadAppData defaults it)", async () => {
+  it("the version this bundle expects shows nothing, and neither does the oldest it reads", async () => {
     expect(await shown(EXPECTED_SCHEMA_VERSION)).toBeNull();
     cleanup();
-    expect(await shown(EXPECTED_SCHEMA_VERSION - 1)).toBeNull();
+    expect(await shown(MIN_SCHEMA_VERSION)).toBeNull();
+  });
+});
+
+// An export set older than the oldest this bundle reads (an old image's refresher wrote it during a deploy) is not read:
+// the same reload notice, saying the data is rebuilt at the next refresh, never the "couldn't load" screen
+describe("DataProvider and an export set OLDER than the bundle reads", () => {
+  function Reloader() {
+    const { reload } = useData();
+    return <button type="button" onClick={() => void reload()}>reload-now</button>;
+  }
+  it("a first load: the reload notice alone, and no app", async () => {
+    serve({ schemaVersion: MIN_SCHEMA_VERSION - 1 });
+    render(<DataProvider><i data-testid="app" /></DataProvider>);
+    const notice = await screen.findByTestId("notice-updated");
+    expect(notice.textContent).toMatch(/^The dashboard was updated — its data is rebuilt at the next refresh; reload this page then\./);
+    expect(screen.getByRole("button", { name: "Reload" })).toBeDefined();
+    expect(screen.queryByTestId("app")).toBeNull();
+    expect(screen.queryByRole("alert"), "not the couldn't-load screen").toBeNull();
+  });
+  it("a reload that meets one keeps the app as it was, under the same notice", async () => {
+    const bodies = serve({});
+    render(<DataProvider><Reloader /><i data-testid="app" /></DataProvider>);
+    await screen.findByTestId("app");
+    expect(screen.queryByTestId("notice-updated")).toBeNull();
+    bodies["manifest.json"] = { ...(bodies["manifest.json"] as object), schema_version: MIN_SCHEMA_VERSION - 1 };
+    fireEvent.click(screen.getByRole("button", { name: "reload-now" }));
+    expect((await screen.findByTestId("notice-updated")).textContent).toMatch(/its data is rebuilt at the next refresh/);
+    expect(screen.getByTestId("app")).toBeDefined();
+    expect(screen.queryByTestId("notice-reload-failed")).toBeNull();
   });
 });
 

@@ -4,9 +4,8 @@ import type { AccountMeta } from "../data/types";
 
 /** Cash-like: an account whose class is Cash. The class is the source of truth for what the balance IS: a brokerage's
  *  cash account is kind "brokerage" as feed plumbing but holds cash, and a savings account that states another class
- *  (a 529, say) is not cash. Both maps that reach this carry the resolved class (accounts.yaml's, else the kind's
- *  default, `defaultClass`): accounts.json's AccountMeta and balances_timeseries.json's accounts map, an older export's
- *  null filled on load. */
+ *  (a 529, say) is not cash. Both maps that reach this carry the class the engine resolves (accounts.yaml's, else the
+ *  kind's default, `defaultClass`): accounts.json's AccountMeta and balances_timeseries.json's accounts map. */
 export function isCashLike(a: { asset_class: string }): boolean {
   return a.asset_class === "Cash";
 }
@@ -24,8 +23,7 @@ export const DEFAULT_CLASS_BY_KIND: Readonly<Record<AccountMeta["kind"], string>
 };
 
 /** The class an account with no stated class takes, as the engine resolves it: Mortgage for the `mortgage: true` loan,
- *  else its kind's default. An export older than the resolved class carries null for such an account; it reads as
- *  this. */
+ *  else its kind's default. */
 export function defaultClass(kind: AccountMeta["kind"], mortgage: boolean): string {
   return kind === "loan" && mortgage ? "Mortgage" : DEFAULT_CLASS_BY_KIND[kind];
 }

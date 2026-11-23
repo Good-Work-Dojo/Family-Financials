@@ -11,7 +11,9 @@ Every address here is from the documentation ranges, which `ipaddress` counts as
 public address stand one in by treating 192.0.2.0/24 as global."""
 from __future__ import annotations
 
+import hashlib
 import ipaddress
+import json
 import os
 import stat
 import tarfile
@@ -21,6 +23,7 @@ import pytest
 from ff_helpers import USER, ready_home
 
 from etl import install, stack_cli
+from etl.exports import SCHEMA_VERSION
 from etl.install import Refused
 
 STAND_IN = ipaddress.ip_network("192.0.2.0/24")
@@ -56,6 +59,85 @@ def test_an_install_in_order_ends_with_its_address(home, capsys):
     assert rc == 0, err
     assert out[-1] == "address: http://127.0.0.1:8080"
     assert any(line.startswith("config OK") for line in out)
+
+
+MARKER = Path("state") / "refresh" / "ingest_wanted"
+
+
+def _exports(home: Path, schema: int) -> None:
+    (home / "data" / "exports" / "manifest.json").write_text(json.dumps({"schema_version": schema}), "utf-8")
+
+
+@pytest.mark.parametrize("exports, asked", [(None, True), (SCHEMA_VERSION - 1, True), (SCHEMA_VERSION, False),
+                                            (SCHEMA_VERSION + 1, False), ("unreadable", True)])
+def test_an_install_with_no_data_or_data_an_older_release_wrote_asks_the_refresher_for_an_ingest(
+        home, capsys, exports, asked):
+    if exports == "unreadable":
+        (home / "data" / "exports" / "manifest.json").write_text("{", "utf-8")
+    elif exports is not None:
+        _exports(home, exports)
+    rc, out, err = _preflight(capsys)
+    assert rc == 0, err
+    assert (home / MARKER).is_file() is asked
+    said = [line for line in out if "is built" in line]
+    assert said == (["the dashboard's data is built about a minute after the services start"] if asked else [])
+
+
+def test_a_refused_preflight_asks_for_no_ingest(home, capsys):
+    (home / "secrets" / "web" / "passcodes").unlink()
+    rc, _, _ = _preflight(capsys)
+    assert rc == 2 and not (home / MARKER).exists()
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+RELEASE_COMPOSE = (install.ROOT / "compose.yaml").read_bytes()
+OLD_COMPOSE = b"# an earlier release's compose.yaml\n" + RELEASE_COMPOSE
+
+
+def test_the_shipped_compose_files_include_this_releases():
+    assert _sha(RELEASE_COMPOSE) in install.SHIPPED_COMPOSE
+    assert all(len(h) == 64 and int(h, 16) >= 0 for h in install.SHIPPED_COMPOSE)
+
+
+def test_this_releases_compose_file_is_left_as_it_is(home, capsys):
+    rc, out, err = _preflight(capsys)
+    assert rc == 0, err
+    assert (home / "compose.yaml").read_bytes() == RELEASE_COMPOSE
+    assert not (home / "compose.yaml.previous").exists() and not (home / "compose.yaml.new").exists()
+    assert not [line for line in out if "compose.yaml" in line]
+
+
+def test_an_earlier_releases_compose_file_is_replaced_and_kept_as_previous(home, capsys, monkeypatch):
+    monkeypatch.setattr(install, "SHIPPED_COMPOSE", install.SHIPPED_COMPOSE | {_sha(OLD_COMPOSE)})
+    (home / "compose.yaml").write_bytes(OLD_COMPOSE)
+    rc, out, err = _preflight(capsys)
+    assert rc == 0, err
+    assert (home / "compose.yaml").read_bytes() == RELEASE_COMPOSE
+    assert (home / "compose.yaml.previous").read_bytes() == OLD_COMPOSE
+    assert "compose.yaml is this release's now: the one before is kept as compose.yaml.previous" in out
+
+
+def test_a_compose_file_changed_by_hand_is_kept_and_this_releases_written_beside_it(home, capsys):
+    mine = RELEASE_COMPOSE + b"# a change of our own\n"
+    (home / "compose.yaml").write_bytes(mine)
+    rc, out, err = _preflight(capsys)
+    assert rc == 0, err
+    assert (home / "compose.yaml").read_bytes() == mine
+    assert (home / "compose.yaml.new").read_bytes() == RELEASE_COMPOSE
+    notes = [line for line in out if "compose.yaml" in line]
+    assert len(notes) == 1 and notes[0].startswith("note: ") and "compose.yaml.new" in notes[0]
+
+
+def test_a_refused_preflight_leaves_compose_yaml_as_it_is(home, capsys, monkeypatch):
+    monkeypatch.setattr(install, "SHIPPED_COMPOSE", install.SHIPPED_COMPOSE | {_sha(OLD_COMPOSE)})
+    (home / "compose.yaml").write_bytes(OLD_COMPOSE)
+    (home / "secrets" / "web" / "passcodes").unlink()
+    rc, _, _ = _preflight(capsys)
+    assert rc == 2 and (home / "compose.yaml").read_bytes() == OLD_COMPOSE
+    assert not (home / "compose.yaml.previous").exists()
 
 
 def test_missing_directories_are_made_as_the_user_before_compose(home, capsys):
@@ -208,6 +290,16 @@ def test_a_failure_after_the_new_images_ran_says_what_runs_and_how_to_go_back(ho
     backup = next((home / "backups").glob("ff-*.tar.gz"))
     assert "The stack now runs the new images" in out
     assert "cp .env.previous .env, then ./ff up" in out and f"./ff restore {backup} --force" in out
+    assert "./ff refresh" in out and "compose.yaml" not in out      # this upgrade replaced no compose.yaml
+
+
+def test_the_way_back_puts_back_the_compose_file_this_upgrade_replaced(home, capsys, monkeypatch):
+    monkeypatch.setattr(install, "SHIPPED_COMPOSE", install.SHIPPED_COMPOSE | {_sha(OLD_COMPOSE)})
+    (home / "compose.yaml").write_bytes(OLD_COMPOSE)
+    assert stack_cli.run("start", to="9.9.9") == 0
+    assert _preflight(capsys)[0] == 0
+    assert stack_cli.run("failed", stage="up") == 0
+    assert "cp compose.yaml.previous compose.yaml" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("image, tag, want", [

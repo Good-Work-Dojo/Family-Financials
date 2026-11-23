@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Additional terms: see NOTICE
 import { describe, expect, it } from "vitest";
-import { OWNER_PALETTE, ownerColor, STREAM_PALETTE, streamColor, UNKNOWN_COLOR } from "./tokens";
+import { CLASS_COLORS, DEBT_CLASSES, OWNER_PALETTE, ownerColor, SHIPPED_ASSET_CLASSES, STREAM_PALETTE, streamColor,
+  UNKNOWN_COLOR } from "./tokens";
+
+// the dashboard's own class list (what the manual-assets editor orders the household's classes by) holds every class the
+// palette colours, each once, in the shipped order, and its debts are the ones plotted as debt bands
+describe("SHIPPED_ASSET_CLASSES", () => {
+  it("is the palette's classes in the dashboard's order, the debts last", () => {
+    expect(SHIPPED_ASSET_CLASSES).toEqual({
+      assets: ["Cash", "Stocks/ETF", "Retirement", "Crypto", "Precious Metals", "Real Estate/Venture", "House", "Car",
+        "529", "Private Stock"],
+      liabilities: ["Mortgage", "Margin", "Other Debt"] });
+    expect([...SHIPPED_ASSET_CLASSES.assets, ...SHIPPED_ASSET_CLASSES.liabilities].sort()).toEqual(Object.keys(CLASS_COLORS).sort());
+    expect(SHIPPED_ASSET_CLASSES.liabilities).toEqual([...DEBT_CLASSES]);
+  });
+});
 
 // the export's owner order: adults, the joint label, children
 const OWNERS = ["Alex", "Sam", "Joint", "Robin", "Jamie"];

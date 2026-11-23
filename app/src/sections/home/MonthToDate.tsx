@@ -56,7 +56,7 @@ export default function MonthToDate() {
               (still coming in) that the spending pages' totals count */}
           <div data-testid="mtd-basis" className="text-xs text-zinc-500">
             spent in {fmtMonth(r.month)} through {fmtDate(r.through)}
-            {end !== null && end > r.through && `, the last complete day: ${fmtDate(end)} is still coming in`}
+            {end !== null && end > r.through && `, the last complete day (${fmtDate(end)} is still coming in)`}
           </div>
           <p data-testid="mtd-pace" className={`mt-2 text-sm font-medium ${r.pace ? PACE_TONE[r.pace] : "text-zinc-300"}`}>
             {paceSentence(r)}

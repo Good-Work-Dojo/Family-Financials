@@ -88,6 +88,13 @@ describe("Second house's marks take the shared mark colours", () => {
     const band = chart.option.series.find((s: { name: string }) => s.name === "Monthly P&I").markArea.data[0];
     expect([band[0].name, band[0].xAxis, band[1].xAxis]).toEqual(["under 20% down", 10, 20]);
   });
+  // the caption says what the band is; a label on the chart collides with the "yours" line and the axis
+  it("the band draws no label of its own", () => {
+    render(<SweepCard i={DEFAULT_INPUTS} />);
+    const area = chart.option.series.find((s: { name: string }) => s.name === "Monthly P&I").markArea;
+    expect(area.label.show).toBe(false);
+    expect(screen.getByTestId("card-down-payment-sweep").textContent).toContain("the shaded band is under 20% down");
+  });
 });
 
 // At 390px the two dashed lines' end labels ("free cash", "current home") collided with the Net bar's value

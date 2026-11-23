@@ -169,7 +169,10 @@ No job may write to the repository: the notes are printed in the run's summary f
 release. `.github/workflows/pages.yml` builds the demo site and deploys it to GitHub Pages only while the repository
 variable `FF_PAGES_ENABLED` is `true`. `.github/dependabot.yml` proposes weekly updates for the lockfiles, the
 Dockerfiles' base images and the workflows' actions; the images the harness's own scripts name (gitleaks and
-actionlint among them) are moved by hand.
+actionlint among them) are moved by hand. A bump of anything the images ship needs `licences.py --write` and, for a
+base image, its `deploy/BASES.md` row (`tests/test_bases.py`) on the bot's branch before the gate passes
+(`tools/maintainer/README.md`, "Dependabot pull requests"). The run summary also prints each image's index digest,
+and `prepare` refuses a tag whose version is not `etl/install.py`'s `VERSION` ("Cutting a release" there).
 
 ## Comparing exports
 

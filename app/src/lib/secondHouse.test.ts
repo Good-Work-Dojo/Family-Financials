@@ -144,6 +144,26 @@ describe("funding", () => {
     }
   });
 
+  // the exports carry each account's resolved class: a 403(b), a TSP, a 457 or an HSA the household files as
+  // Retirement (or 529) is one, whatever its name says
+  it("classifies retirement by the account's class first, its name second", () => {
+    const by = (a: AccountMeta) => fundingRows([a], {})[0];
+    for (const name of ["Alex's 403(b)", "Sam's TSP", "Example 457 plan", "Family HSA"]) {
+      const r = by(acct({ id: "r", name, kind: "brokerage", asset_class: "Retirement", latest_balance: 10_000 }));
+      expect([r.retirement, r.taxableDrag], name).toEqual([true, false]);
+    }
+    const college = by(acct({ id: "c", name: "Jamie's college fund", kind: "brokerage", asset_class: "529", latest_balance: 10_000 }));
+    expect([college.retirement, college.taxableDrag]).toEqual([true, false]);
+    // ranked after the taxable brokerage, as a named IRA is
+    const ids = eligibleFundingAccounts([
+      acct({ id: "tsp", name: "Sam's TSP", kind: "brokerage", asset_class: "Retirement", latest_balance: 10_000 }),
+      acct({ id: "brk", name: "Joint Brokerage", kind: "brokerage", asset_class: "Stocks/ETF", latest_balance: 10_000 }),
+    ]).map((a) => a.id);
+    expect(ids).toEqual(["brk", "tsp"]);
+    const taxable = by(acct({ id: "b", name: "Joint Brokerage", kind: "brokerage", asset_class: "Stocks/ETF", latest_balance: 10_000 }));
+    expect([taxable.retirement, taxable.taxableDrag]).toEqual([false, true]);
+  });
+
   it("joins draws, flags overdraw without clamping, and marks tax treatments", () => {
     const rows = fundingRows(accounts, { chk: 12_000, brk: 5_000, bogus: 99, sav: -50 });
     const by = Object.fromEntries(rows.map((r) => [r.accountId, r]));

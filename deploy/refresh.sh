@@ -66,6 +66,7 @@ else
   OWN_DIR="$(abs "${FF_STORE_DIR:-$ROOT}")/simplefin"
 fi
 LOG="$OWN_DIR/fetch.log"
+LOG_SHOWN="state/engine/fetch.log"                           # the log as a person finds it in the install directory
 LOG_MAX_BYTES=1048576                                        # past this the log is moved aside (one older log kept)
 STATE="$OWN_DIR/.refresh_state"                              # consecutive-failure counter
 REAUTH_STATE="$OWN_DIR/.reauth_state"
@@ -193,7 +194,7 @@ run_step() {  # run_step <label> <cmd...>
   local out; out="$("$@" 2>&1)"; local code=$?
   printf '%s\n' "$out" >> "$RUN_OUT"
   [ -z "$LOG_FD" ] || printf '%s\n' "$out" >&"$LOG_FD"
-  [ "$code" -ne 0 ] && logline "!!! $label failed (exit $code)"
+  [ "$code" -ne 0 ] && logline "!!! $label failed (exit $code): its lines are in $LOG_SHOWN in the install; ./ff validate lists config problems"
   return "$code"
 }
 
@@ -279,7 +280,7 @@ if [ "$MODE" = ingest ]; then
   elif [ -n "$(get "$INGEST_ALERT_STATE" 2>/dev/null)" ]; then
     logline "!!! an ingest without a feed fetch failed again (rc=$rc): alert suppressed as a repeat of this failure streak's"
   else
-    alert "🔴 data refresh FAILED (an ingest without a feed fetch errored). Dashboard data may be stale. Check the refresher's log ('docker compose logs refresher') and fetch.log. (Repeat alerts suppressed until an ingest succeeds.)"
+    alert "🔴 data refresh FAILED (an ingest without a feed fetch errored). Dashboard data may be stale. Its lines are in $LOG_SHOWN in the install (./ff logs refresher shows the run); ./ff validate lists config problems. (Repeat alerts suppressed until an ingest succeeds.)"
     put "$INGEST_ALERT_STATE" alerted || true
   fi
   logline "=== $(ts) ingest done (rc=$rc) ==="
@@ -343,11 +344,11 @@ else
 fi
 # (2) Ingest failed — the dashboard data is broken/stale until fixed (alert every run).
 if [ "$rc" -eq 2 ]; then
-  alert "🔴 data refresh FAILED (ingest errored; steps: ${failed}). Dashboard data may be stale. Check the scheduler's log ('docker compose logs scheduler') and fetch.log."
+  alert "🔴 data refresh FAILED (ingest errored; steps: ${failed}). Dashboard data may be stale. Its lines are in $LOG_SHOWN in the install (./ff logs scheduler shows the run); ./ff validate lists config problems."
 # (3) A feed has failed 2 runs in a row — persistent (revoked credential / extended outage), not a one-off blip, so
 #     worth one ping even though ingest self-healed; the runs after it in the same streak are logged only.
 elif [ "$rc" -ne 0 ] && [ "$streak" -eq 2 ]; then
-  alert "🟠 data refresh has failed ${streak} runs in a row (steps: ${failed}). Balances are going stale. See fetch.log. (Repeat alerts suppressed until a refresh succeeds.)"
+  alert "🟠 data refresh has failed ${streak} runs in a row (steps: ${failed}). Balances are going stale. See $LOG_SHOWN in the install. (Repeat alerts suppressed until a refresh succeeds.)"
 elif [ "$rc" -ne 0 ] && [ "$streak" -gt 2 ]; then
   logline "!!! the refresh has failed ${streak} runs in a row: alert suppressed as a repeat of this failure streak's"
 fi

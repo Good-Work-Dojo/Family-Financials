@@ -59,8 +59,11 @@ const ISO = "YYYY-MM-DD";
 
 /** An item's expected charge dates through `until` (an ISO day; the list may run one date past it), the one projection
  *  Spending → Recurring's bills and Planning's cash-flow forecast both read. First the dates the export gives
- *  (`expected_dates`: the ETL's, so a monthly bill on its own day of the month; `next_expected` alone from an export
- *  that has none), then later ones by its cadence: a monthly, quarterly or annual item by calendar months, each counted
+ *  (`expected_dates`: the ETL's, so a monthly bill on its own day of the month, a business-day end included; a monthly
+ *  item carries thirteen, which reach the twelfth month after the month in progress, so a next-12-months view reads them
+ *  as they are; `next_expected` alone from an export that has none). Only past them, the fallback for a date the export
+ *  does not reach (a bill already late, a longer horizon), later ones by its cadence: a monthly, quarterly or annual
+ *  item by calendar months, each counted
  *  from the exported date with the latest day of the month (so a clamped month end never becomes the day: 28 Feb is
  *  followed by 31 Mar) and kept from the month after the last exported date on, so a monthly item falls once in every
  *  month after its exported ones; a weekly or biweekly one by its median gap in days (7 or 14 without one), as the ETL

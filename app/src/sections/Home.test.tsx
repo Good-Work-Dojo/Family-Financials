@@ -53,6 +53,28 @@ const withSnapshots = (dates: string[]): AppData => ({
   ...base, assets: { snapshots: dates.map((d, i) => snap({ snapshot_date: d, total: 2_000_000 + i * 100_000 })) },
 });
 
+// a change's share is of a base above zero only (a share of a negative total reads backwards), and a change under 1% of
+// it keeps a decimal, never "(0%)"
+describe("Home: the share a net-worth change is of its base", () => {
+  const totals = (ts: number[]): AppData => ({
+    ...base, assets: { snapshots: ts.map((total, i) => snap({ snapshot_date: `203${i}-06-01`, total })) },
+  });
+  const chips = () => [...screen.getByTestId("card-snapshot-deltas").querySelectorAll("li")].map((li) => li.textContent);
+  it("from a negative total: the change with no share, in the chip and in the tile", () => {
+    data = totals([-50_000, -25_000]);
+    mount();
+    expect(chips()).toEqual([`vs ${fmtDate("2030-06-01")}: +$25,000`]);
+    const changes = screen.getAllByText(/^\+\$25,000/);
+    expect(changes.length, "the chip and the net-worth tile").toBe(2);
+    for (const c of changes) expect(c.textContent).not.toContain("%");
+  });
+  it("a change under 1%: one decimal", () => {
+    data = totals([1_000_000, 1_003_346]);
+    mount();
+    expect(chips()).toEqual([`vs ${fmtDate("2030-06-01")}: +$3,346 (0.3%)`]);
+  });
+});
+
 describe("Home: the net-worth decomposition", () => {
   it("with a single snapshot keeps its card and says it needs a second one", () => {
     data = withSnapshots(["2030-06-01"]);

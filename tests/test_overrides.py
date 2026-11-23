@@ -6,6 +6,14 @@ import pytest
 from conftest import load_demo, make_txn
 
 from etl.enrich.overrides import apply
+from etl.exports import export_cashflow_monthly
+from etl.models import (
+    FALLBACK_CATEGORY,
+    INCOME_CATEGORY,
+    INCOME_OTHER_SUB,
+    INTERNAL_CATEGORY,
+    UNCATEGORIZED_SUB,
+)
 from tools.demo import household as hh
 
 
@@ -29,6 +37,65 @@ def test_match_requires_all_fields_and_applies_set():
     assert not rows[0].needs_review
     assert rows[1].type == "purchase" and rows[2].type == "purchase"
     assert [c for c in checks if c.status == "warn"] == []
+
+
+def _month(rows):
+    """The one month of `rows` as the cash-flow export gives it"""
+    [month] = export_cashflow_monthly(rows, {hh.CHECKING: ("2030-05-01", "2030-05-31")}, [hh.CHECKING],
+                                      min_share=0.6, today="2030-06-01")["months"]
+    return month
+
+
+def test_a_transfer_an_override_retypes_to_a_purchase_is_spending_filed_under_the_fallback_not_internal():
+    t = make_txn(date="2030-05-10", desc="SAMPLE TRANSFER 0000", cents=-500_00, account=hh.CHECKING, type="transfer",
+                 category=INTERNAL_CATEGORY, subcategory="transfer", category_source="internal", is_internal=True)
+    apply([t], [{"match": {"contains": "SAMPLE TRANSFER"}, "set": {"type": "purchase"}}])
+    assert (t.type, t.is_internal, t.category, t.subcategory, t.category_source) == (
+        "purchase", False, FALLBACK_CATEGORY, UNCATEGORIZED_SUB, "fallback")
+    month = _month([t])
+    assert month["spend"] == 500.0 and list(month["by_category"]) == [FALLBACK_CATEGORY]
+
+
+def test_a_purchase_an_override_retypes_to_income_is_an_income_row_not_a_stream_named_for_its_old_subcategory():
+    t = make_txn(date="2030-05-10", desc="SAMPLE GROCER REBATE", cents=40_00, account=hh.CHECKING,
+                 category="Groceries", subcategory="Supermarket", category_source="keyword")
+    apply([t], [{"match": {"contains": "SAMPLE GROCER"}, "set": {"type": "income"}}])
+    assert (t.type, t.category, t.subcategory, t.category_source) == ("income", INCOME_CATEGORY, None, "type_default")
+    assert _month([t])["income_by_subcategory"] == {INCOME_OTHER_SUB: 40.0}
+
+
+@pytest.mark.parametrize("retype", ["transfer", "cc-payment", "investment"])
+def test_a_row_an_override_retypes_internal_is_filed_internal_unless_the_override_names_a_category(retype):
+    plain = make_txn(date="2030-05-10", desc="SAMPLE MOVE", cents=-75_00, category="Shopping", subcategory="Online",
+                     category_source="vendor_rule")
+    named = make_txn(date="2030-05-11", desc="SAMPLE MOVE", cents=-25_00, category="Shopping", subcategory="Online",
+                     category_source="vendor_rule")
+    apply([plain], [{"match": {"contains": "SAMPLE MOVE"}, "set": {"type": retype}}])
+    apply([named], [{"match": {"contains": "SAMPLE MOVE"}, "set": {"type": retype, "category": "Savings"}}])
+    assert (plain.category, plain.subcategory, plain.category_source) == (INTERNAL_CATEGORY, retype, "internal")
+    assert (named.category, named.subcategory, named.category_source) == ("Savings", "Online", "override")
+    assert _month([plain, named])["spend"] == 0.0
+
+
+def test_an_override_that_states_the_type_a_row_has_already_leaves_it_where_it_is_filed():
+    """A `type` equal to the row's own is no retype: an income row filed outside Income keeps its category when an
+    override names its earner, and a transfer filed under a category of its own is not refiled as Internal."""
+    gift = make_txn(date="2030-05-10", desc="SAMPLE GIFT RECEIVED", cents=200_00, type="income", category="Giving",
+                    subcategory="Gifts", category_source="keyword")
+    moved = make_txn(date="2030-05-11", desc="SAMPLE MOVE", cents=-75_00, type="transfer", category="Savings",
+                     subcategory="Emergency fund", category_source="vendor_rule", is_internal=True)
+    apply([gift], [{"match": {"contains": "SAMPLE GIFT"}, "set": {"type": "income", "earner": "Alex"}}])
+    apply([moved], [{"match": {"contains": "SAMPLE MOVE"}, "set": {"type": "transfer", "needs_review": False}}])
+    assert (gift.type, gift.category, gift.subcategory, gift.category_source, gift.earner) == (
+        "income", "Giving", "Gifts", "keyword", "Alex")
+    assert (moved.type, moved.category, moved.subcategory, moved.category_source) == (
+        "transfer", "Savings", "Emergency fund", "vendor_rule")
+
+
+def test_an_override_that_keeps_the_type_leaves_the_category_it_sets():
+    t = make_txn(date="2030-05-10", desc="SAMPLE GIFT", cents=-30_00, category="Shopping", subcategory="Online")
+    apply([t], [{"match": {"contains": "SAMPLE GIFT"}, "set": {"category": "Giving", "subcategory": "Gifts"}}])
+    assert (t.type, t.category, t.subcategory, t.category_source) == ("purchase", "Giving", "Gifts", "override")
 
 
 def test_tags_merge_not_replace():

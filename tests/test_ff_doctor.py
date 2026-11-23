@@ -145,6 +145,74 @@ def test_an_old_snapshot_warns_against_the_schedule(home):
     assert any(line.startswith("warn  the bank feed was last fetched 40 hours ago") for line in lines)
 
 
+def _snapshot(home: Path) -> None:
+    snaps = home / "store" / "simplefin" / "snapshots"
+    snaps.mkdir(parents=True, exist_ok=True)
+    (snaps / f"accounts-{dt.datetime.now(dt.UTC):%Y%m%dT%H%M%SZ}.json").write_text("{}")
+
+
+def _backup(home: Path, days_ago: float) -> None:
+    taken = dt.datetime.now(dt.UTC) - dt.timedelta(days=days_ago)
+    (home / "backups" / f"ff-{taken:%Y%m%dT%H%M%SZ}.tar.gz").write_bytes(b"")
+
+
+@pytest.mark.parametrize("backups, warned", [([], True), ([45], True), ([45, 3], False), ([29], False)])
+def test_the_feeds_history_with_no_recent_backup_warns(home, backups, warned):
+    _snapshot(home)
+    for days in backups:
+        _backup(home, days)
+    rc, lines = _doctor()
+    assert rc == 0
+    said = [line for line in lines if "backed up" in line or "backup" in line]
+    if warned:
+        assert said == [(f"warn  the bank feed's history was last backed up {max(backups)} days ago" if backups
+                         else "warn  the bank feed's history is not backed up")
+                        + " — ./ff backup, then copy it off this computer"]
+    else:
+        assert said == [f"ok    the newest backup is {min(backups)} days old"]
+
+
+def test_with_no_feed_history_no_backup_is_asked_for(home):
+    rc, lines = _doctor()
+    assert not [line for line in lines if "backup" in line]
+
+
+def test_the_last_line_counts_the_warnings_above(home):
+    (home / "imports" / "stray-2025.csv").write_text("a,b\n")
+    rc, lines = _doctor()
+    assert rc == 0 and lines[-1] == "no problem found; 1 warning above"
+    (home / "imports" / "stray-2026.csv").write_text("a,b\n")
+    install.write_env(home, {"FF_BIND": "0.0.0.0"})
+    rc, lines = _doctor()
+    warns = sum(line.startswith("warn") for line in lines)
+    assert warns == 2 and lines[-1] == "no problem found; 2 warnings above"
+
+
+@pytest.mark.parametrize("manifest_age_h, fix", [(None, "./ff up builds it"), (72, "./ff up, then ./ff refresh")])
+def test_missing_or_old_data_names_what_builds_it_when_the_stack_is_down(home, manifest_age_h, fix):
+    manifest = home / "data" / "exports" / "manifest.json"
+    if manifest_age_h is None:
+        manifest.unlink()
+    else:
+        old = dt.datetime.now(dt.UTC).timestamp() - manifest_age_h * 3600
+        os.utime(manifest, (old, old))
+    _, lines = _doctor()
+    [line] = [line for line in lines if "the dashboard" in line and "data" in line]
+    assert line.startswith("warn") and fix in line
+
+
+def test_feed_ids_with_no_stored_access_are_warned_of_not_called_files_alone(home):
+    accounts = home / "config" / "accounts.yaml"
+    accounts.write_text(accounts.read_text().replace("    kind: checking\n",
+                                                     "    kind: checking\n    simplefin_id: ACT-sample-0001\n"
+                                                     "    simplefin_cutover: 2030-01-01\n"))
+    rc, lines = _doctor()
+    assert rc == 0, "\n".join(lines)
+    assert not [line for line in lines if "no bank feed is set up" in line]
+    assert ("warn  1 account names a bank feed id, but no bank feed access is stored: it shows the stored snapshots "
+            "only — ./ff init --feed connects the bank feed again") in lines
+
+
 def test_an_alert_credential_others_may_read_fails(home):
     token = home / "secrets" / "alerts" / "telegram_token"
     token.write_text("0000:sample")
