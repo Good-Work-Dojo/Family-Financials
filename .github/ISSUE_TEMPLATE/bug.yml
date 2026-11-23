@@ -44,7 +44,7 @@ body:
     id: setup
     attributes:
       label: Where it runs
-      description: The operating system, the Docker and Compose versions (`docker version`, `docker compose version`), and the browser if the problem is in the dashboard.
+      description: The operating system (Linux, macOS with Docker Desktop, or Windows with Docker Desktop on WSL2), the Docker and Compose versions (`docker version`, `docker compose version`), and the browser if the problem is in the dashboard.
   - type: checkboxes
     id: no-real-data
     attributes:

@@ -54,16 +54,21 @@ change stays in your browser, and clearing the site's data puts the demo back as
 
 ## Requirements
 
-- **A 64-bit Linux computer** (amd64 or arm64, such as a small home server or a single-board computer running a
-  64-bit system) that stays on, so the scheduled refresh runs.
-- **Docker Engine with the Compose plugin, v2.20 or newer**, usable by your own user (not root). `ff` checks both.
+- **A computer that runs Docker and stays on**, so the scheduled refresh runs:
+  - **Supported: 64-bit Linux** (amd64 or arm64, such as a small home server, a NAS or a single-board computer
+    running a 64-bit system). This is where Family Financials is developed and tested.
+  - **Should work, best effort: macOS with Docker Desktop, and Windows with Docker Desktop on WSL2**, with the
+    install folder inside WSL's own Linux files rather than on a Windows drive (`ff` refuses `/mnt/c` and the like).
+    These are not tested; if something does not work, please open an issue and say which platform you are on.
+- **Docker Engine (or Docker Desktop) with the Compose plugin, v2.20 or newer**, usable by your own user (not root).
+  `ff` checks both.
 - **Memory:** about 60 MiB for the four services at rest; a rebuild of the data briefly needs about 40 MiB more
   (measured on the demo household: about two years and 1,400 transactions).
 - **Disk:** about 400 MB for the two images, plus your statements, the feed's history and the database (about 2 MB
   for the demo household's two years).
 
-Not tested: macOS (Docker Desktop), Windows through WSL, rootless Docker and SELinux in enforcing mode. `ff` names
-each of these when it sees it and changes nothing for it.
+Also untested: rootless Docker and SELinux in enforcing mode. `ff` names each of these when it sees it and changes
+nothing for it.
 
 ## Quick start: the demo household
 
