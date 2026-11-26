@@ -7,12 +7,12 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = [
-    "pyyaml>=6.0",
-    "certifi>=2024.0",   # CA bundle for the SimpleFIN HTTPS fetch (macOS lacks one)
+    "pyyaml>=6.0.4",
+    "certifi>=2026.11.20",   # CA bundle for the SimpleFIN HTTPS fetch (macOS lacks one)
     # the optional AI step's two providers, imported only by etl/ai/providers.py and only when it calls one; each a
     # release at least 14 days old when pinned, its dependencies locked no newer (uv.lock's exclude-newer)
-    "anthropic==2.4.0",
-    "openai==3.44.0",
+    "anthropic==2.12.0",
+    "openai==3.57.0",
 ]
 
 [project.urls]
@@ -21,7 +21,7 @@ Source = "https://github.com/Good-Work-Dojo/Family-Financials"
 Issues = "https://github.com/Good-Work-Dojo/Family-Financials/issues"
 
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.15"]
+dev = ["pytest>=9.2.0", "ruff>=0.17.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
